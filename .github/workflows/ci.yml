@@ -1,0 +1,98 @@
+name: ci
+
+# Runs on every push to master, every pull request, and once a day (UTC) as
+# the scheduled smoke test. The Windows job builds all three binaries, runs
+# the Rust test suites, then installs to a throwaway prefix and drives the
+# real Explorer shell integration - registry verbs, Explorer verb
+# resolution, and actual verb invocations (compress / extract / repair,
+# including the encrypted-repair scenario) - via verify-shell.ps1 -Run and
+# the scheduled smoke-test runner.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: '17 5 * * *' # daily at 05:17 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Build release binaries (engine + GUI)
+        run: cargo build --release --bin nextar --bin nextar-gui
+
+      - name: Build installer wizard
+        run: cargo build --release --manifest-path setup/Cargo.toml
+
+      - name: Run unit + integration tests
+        run: |
+          cargo test
+          cargo test --manifest-path setup/Cargo.toml
+
+      - name: Lint
+        run: |
+          cargo clippy --all-targets
+          cargo clippy --all-targets --manifest-path setup/Cargo.toml
+
+      # Registers the HKCU Explorer verbs + .next association + SendTo
+      # shortcut for the runner user, pointing at the temp prefix.
+      - name: Install to temp prefix (registers shell integration)
+        shell: pwsh
+        run: |
+          setup/target/release/nextar-setup.exe --quiet --prefix "$env:RUNNER_TEMP\nextar-ci"
+
+      - name: Shell verification - registry + Explorer + invoked verbs
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Run -InstallDir "$env:RUNNER_TEMP\nextar-ci"
+
+      - name: Scheduled smoke-test runner (deep)
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-shell-test.ps1 -Deep -InstallDir "$env:RUNNER_TEMP\nextar-ci"
+
+  # macOS: cross-platform packaging. The engine + GUI are fully portable
+  # (Windows-only bits - registry theme detection, DWM title bar/corners,
+  # shell integration - are #[cfg(windows)] and compile away); the .dmg
+  # must be produced on macOS (hdiutil/codesign), so this runs on a Mac.
+  macos-package:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binaries
+        run: cargo build --release --bin nextar --bin nextar-gui
+
+      - name: Run tests (macOS)
+        run: cargo test
+
+      - name: Build the .dmg pipeline
+        run: bash installers/macos/build-dmg.sh
+
+      - name: Verify the disk image mounts and contains the app
+        run: |
+          DMG=$(ls dist/*.dmg)
+          echo "artifact: $DMG"
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint /tmp/nextar-dmg
+          test -d /tmp/nextar-dmg/nextar.app && echo "nextar.app present"
+          test -x /tmp/nextar-dmg/nextar && echo "CLI present"
+          ls /tmp/nextar-dmg
+          hdiutil detach /tmp/nextar-dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nextar-macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error

@@ -1,0 +1,66 @@
+[package]
+name = "nextar"
+version = "0.1.0"
+edition = "2021"
+description = "Next-generation archiver: Zstd/LZMA2 compression, Argon2id + XChaCha20-Poly1305 encryption, Reed-Solomon recovery volumes, fully parallel pipeline"
+license = "MIT"
+
+[[bin]]
+name = "nextar"
+path = "src/main.rs"
+
+[[bin]]
+name = "nextar-gui"
+path = "src/bin/nextar-gui.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Compression
+zstd = "0.13"                 # default "fast" tier
+xz2 = { version = "0.1", features = ["static"] }  # LZMA2 "ultra" tier (bundled liblzma)
+
+# Cryptography
+argon2 = "0.5"                # Argon2id key derivation
+chacha20poly1305 = "0.10"     # XChaCha20-Poly1305 AEAD
+rand = "0.8"                  # OsRng for salts/nonces
+
+# Integrity & resilience
+crc32fast = "1"               # per-block checksums
+reed-solomon-erasure = "6" # Reed-Solomon erasure coding for recovery volumes
+sha2 = "0.10"                # deterministic per-block nonces
+
+# Errors
+anyhow = "1"
+
+# Parallelism & I/O
+crossbeam-channel = "0.5"
+num_cpus = "1"
+
+# Metadata serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Filesystem traversal
+walkdir = "2"
+eframe = "0.36.1"
+rfd = "0.17.2"
+winreg = "0.52"                 # Windows theme detection (light/dark logo tile)
+
+[target.'cfg(windows)'.dependencies]
+# Native window chrome: title bar follows the app palette via DWM attributes.
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_LibraryLoader"] }
+
+[build-dependencies]
+# Embeds the Windows app icon (resources/nextar.ico) into the exe at build time.
+embed-resource = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+
+[profile.release]
+lto = true
+codegen-units = 1

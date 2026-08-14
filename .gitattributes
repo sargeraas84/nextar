@@ -1,0 +1,16 @@
+# Normalize text files to LF in the repo; CRLF only where Windows needs it.
+* text=auto
+
+# Shell scripts must stay LF or bash breaks (esp. on Linux/macOS CI runners).
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows-centric files: keep CRLF for editors/tools that expect it.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets.
+*.ico binary
+*.icns binary
+*.png binary

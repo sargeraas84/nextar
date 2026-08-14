@@ -1,0 +1,18 @@
+# Rust build output
+/target
+/setup/target
+**/target/
+
+# Built distribution artifacts (rebuilt by CI / scripts/package.sh)
+/dist
+
+# Dev-only preview assets (logo showcase, card generator)
+/_preview
+
+# OS / editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+.idea/
+.vscode/
