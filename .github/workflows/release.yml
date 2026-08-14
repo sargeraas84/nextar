@@ -1,0 +1,130 @@
+name: release
+
+# Two ways to release:
+#   1. Push a `v*` tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`) -
+#      builds and attaches the Windows installer + macOS dmg at that tag.
+#   2. Run this workflow manually with a `version` input (e.g. `0.2.0`) -
+#      bumps Cargo.toml + the installer's version, commits, tags v0.2.0,
+#      pushes, then builds and releases in the same run.
+#
+# The manual path pushes with the repo-scoped GITHUB_TOKEN, which GitHub does
+# NOT let trigger other workflows - so this workflow creates the release
+# itself instead of relying on the tag-push trigger.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.2.0). Bumps Cargo.toml, tags v0.2.0, builds and releases.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # Version bump + tag, only for the manual path. The job always runs (so
+  # dependents aren't skipped); its steps are no-ops on tag pushes.
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version, commit, and tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          V="${{ github.event.inputs.version }}"
+          V="${V#v}"
+          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must look like 0.2.0, got '$V'" >&2
+            exit 1
+          fi
+          if git rev-parse "v$V" >/dev/null 2>&1; then
+            echo "tag v$V already exists" >&2
+            exit 1
+          fi
+          sed -i "s/^version = \".*\"/version = \"$V\"/" Cargo.toml setup/Cargo.toml
+          sed -i "s/const VERSION: &str = \"[^\"]*\"/const VERSION: \&str = \"$V\"/" setup/src/main.rs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release v$V"
+          git push origin master
+          git tag "v$V"
+          git push origin "v$V"
+          echo "released v$V" >> "$GITHUB_STEP_SUMMARY"
+
+  windows:
+    runs-on: windows-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', github.event.inputs.version) || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests before shipping
+        run: |
+          cargo test
+          cargo test --manifest-path setup/Cargo.toml
+
+      - name: Build installer distribution
+        shell: bash
+        run: bash scripts/package.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            dist/nextar-setup.exe
+            dist/nextar.exe
+            dist/nextar-gui.exe
+
+  macos:
+    runs-on: macos-latest
+    needs: prepare
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', github.event.inputs.version) || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests before shipping
+        run: cargo test
+
+      - name: Build the .dmg
+        run: bash installers/macos/build-dmg.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [windows, macos]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: assets/
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: assets/
+
+      - name: Create GitHub release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
+          name: nextar ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            assets/nextar-setup.exe
+            assets/nextar.exe
+            assets/nextar-gui.exe
+            assets/nextar-*.dmg
