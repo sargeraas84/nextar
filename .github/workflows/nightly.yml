@@ -160,7 +160,7 @@ jobs:
           tag_name: nightly
           name: nextar nightly
           prerelease: true
-          overwrite: true
+          overwrite_files: true
           body_path: ${{ github.workspace }}/body.md
           files: |
             assets/nextar-setup.exe
