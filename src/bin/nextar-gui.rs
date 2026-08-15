@@ -415,8 +415,35 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-/// Append a settings-reset event to `recovery.log` in `dir`. Best-effort:
-/// auditing must never fail a reset. Returns the log path on success.
+/// Maximum number of reset events kept in `recovery.log` before older
+/// entries are rotated out, so the audit file never grows without bound.
+const RECOVERY_LOG_MAX_ENTRIES: usize = 50;
+
+/// Rewrite `recovery.log` so it keeps only the most recent
+/// [`RECOVERY_LOG_MAX_ENTRIES`] lines. Best-effort: a rotation failure never
+/// breaks a reset (the freshly appended line is already on disk).
+fn rotate_recovery_log(log: &Path) {
+    let Ok(raw) = std::fs::read_to_string(log) else {
+        return;
+    };
+    let lines: Vec<&str> = raw.lines().collect();
+    if lines.len() <= RECOVERY_LOG_MAX_ENTRIES {
+        return;
+    }
+    let mut out = lines
+        .iter()
+        .skip(lines.len() - RECOVERY_LOG_MAX_ENTRIES)
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n");
+    out.push('\n');
+    let _ = std::fs::write(log, out);
+}
+
+/// Append a settings-reset event to `recovery.log` in `dir`, then rotate the
+/// file down to the most recent [`RECOVERY_LOG_MAX_ENTRIES`] entries.
+/// Best-effort: auditing must never fail a reset. Returns the log path on
+/// success.
 fn log_recovery_to(dir: &Path, backup: &Path) -> Option<PathBuf> {
     if std::fs::create_dir_all(dir).is_err() {
         return None;
@@ -434,7 +461,11 @@ fn log_recovery_to(dir: &Path, backup: &Path) -> Option<PathBuf> {
         .open(&log)
         .and_then(|mut f| f.write_all(line.as_bytes()))
         .is_ok();
-    ok.then_some(log)
+    if !ok {
+        return None;
+    }
+    rotate_recovery_log(&log);
+    Some(log)
 }
 
 /// Log a settings reset to `recovery.log` beside settings.json.
@@ -442,6 +473,46 @@ fn log_recovery(backup: &Path) {
     if let Some(dir) = settings_path().parent() {
         let _ = log_recovery_to(dir, backup);
     }
+}
+
+/// One audited reset event parsed from `recovery.log`.
+struct RecoveryEntry {
+    timestamp: String,
+    backup: String,
+}
+
+/// Read and parse `recovery.log` from `dir`, oldest first. A missing or
+/// unreadable log yields an empty list.
+fn read_recovery_entries_at(dir: &Path) -> Vec<RecoveryEntry> {
+    let log = dir.join("recovery.log");
+    let Ok(raw) = std::fs::read_to_string(&log) else {
+        return Vec::new();
+    };
+    raw.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            // "[2026-08-15 09:41:02] settings reset -> backed up to <path>"
+            let ts_end = line.find(']')?;
+            let ts = &line[1..ts_end];
+            let rest = &line[ts_end + 1..];
+            let marker = "settings reset -> backed up to ";
+            let idx = rest.find(marker)?;
+            let backup = rest[idx + marker.len()..].trim();
+            Some(RecoveryEntry {
+                timestamp: ts.to_string(),
+                backup: backup.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Read `recovery.log` beside settings.json and parse every reset event,
+/// oldest first.
+fn read_recovery_entries() -> Vec<RecoveryEntry> {
+    settings_path()
+        .parent()
+        .map(read_recovery_entries_at)
+        .unwrap_or_default()
 }
 
 /// Back up the settings file and delete the original. Returns the backup
@@ -3321,6 +3392,57 @@ impl GuiApp {
                         .color(text3()),
                 );
             });
+        // Recovery history: audited backups from previous resets, so a user
+        // can locate and restore an earlier settings file.
+        let entries = read_recovery_entries();
+        if !entries.is_empty() {
+            ui.add_space(12.0);
+            ui.label(RichText::new("Recovery history").size(12.0).color(text3()));
+            ui.add_space(6.0);
+            egui::Frame::new()
+                .fill(bg2())
+                .stroke(Stroke::new(1.0, border()))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::same(14))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    egui::ScrollArea::vertical()
+                        .max_height(160.0)
+                        .show(ui, |ui| {
+                            for entry in entries.iter().rev() {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(&entry.timestamp)
+                                            .size(11.0)
+                                            .monospace()
+                                            .color(text3()),
+                                    );
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .small_button("copy path")
+                                                .on_hover_text("Copy the backup path to the clipboard")
+                                                .clicked()
+                                            {
+                                                ui.ctx().copy_text(entry.backup.clone());
+                                            }
+                                        },
+                                    );
+                                });
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&entry.backup)
+                                            .size(11.5)
+                                            .color(text2()),
+                                    )
+                                    .wrap(),
+                                );
+                                ui.add_space(8.0);
+                            }
+                        });
+                });
+        }
         ui.add_space(12.0);
         ui.label(
             RichText::new(format!("settings saved to {}", settings_path().display()))
@@ -4812,6 +4934,62 @@ mod tests {
         assert_eq!(&stamp[10..11], " ");
         assert_eq!(&stamp[13..14], ":");
         assert_eq!(&stamp[16..17], ":");
+    }
+
+    #[test]
+    fn recovery_log_rotates_to_last_n_entries() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("recovery.log");
+        // More than N entries: after rotation only the newest N survive.
+        let total = RECOVERY_LOG_MAX_ENTRIES + 7;
+        for i in 0..total {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log)
+                .unwrap()
+                .write_all(format!("[entry {i}] settings reset -> backed up to b{i}\n").as_bytes())
+                .unwrap();
+        }
+        rotate_recovery_log(&log);
+        let kept = std::fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = kept.lines().collect();
+        assert_eq!(lines.len(), RECOVERY_LOG_MAX_ENTRIES, "kept exactly N entries");
+        assert!(kept.contains("entry 56"), "newest entries survive: {kept}");
+        assert!(!kept.contains("entry 0"), "oldest entries rotated out: {kept}");
+        assert!(!kept.contains("entry 6"), "entries beyond N dropped: {kept}");
+        // Under the limit: a short log is left untouched.
+        let small = dir.path().join("small.log");
+        std::fs::write(&small, "one line\n").unwrap();
+        rotate_recovery_log(&small);
+        assert_eq!(std::fs::read_to_string(&small).unwrap(), "one line\n");
+    }
+
+    #[test]
+    fn recovery_entries_parse_timestamp_and_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("recovery.log");
+        std::fs::write(
+            &log,
+            "[2026-08-15 09:41:02] settings reset -> backed up to C:\\tmp\\settings.json.corrupt-1\n\
+             [2026-08-15 10:00:00] settings reset -> backed up to C:\\tmp\\settings.json.corrupt-2\n",
+        )
+        .unwrap();
+        let entries = read_recovery_entries_at(dir.path());
+        assert_eq!(entries.len(), 2, "two parsed entries");
+        assert_eq!(entries[0].timestamp, "2026-08-15 09:41:02");
+        assert_eq!(entries[0].backup, "C:\\tmp\\settings.json.corrupt-1");
+        assert_eq!(entries[1].backup, "C:\\tmp\\settings.json.corrupt-2");
+        // A malformed line is skipped, not fatal.
+        std::fs::write(
+            &log,
+            "garbage\n[2026-08-15 11:00:00] settings reset -> backed up to ok\n",
+        )
+        .unwrap();
+        let entries = read_recovery_entries_at(dir.path());
+        assert_eq!(entries.len(), 1, "garbage line skipped");
+        assert_eq!(entries[0].backup, "ok");
     }
 
     #[test]
