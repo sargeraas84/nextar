@@ -25,6 +25,29 @@ jobs:
 
       # The stable nightly release URL: fixed asset names, updated in place
       # by the nightly workflow, so this always tests the newest build.
+      #
+      # Schedule alignment: the nightly workflow builds at 04:37 UTC and
+      # publishes ~05:01 UTC (windows job ~24 min), and this smoke runs at
+      # 05:47 UTC - a ~46 min buffer so it always exercises a fresh release.
+      #
+      # Guard: if the nightly pipeline ever fails, this refuses to silently
+      # smoke-test a stale artifact (the previous day's build) instead of
+      # the newest one.
+      - name: Assert the nightly release is fresh
+        shell: pwsh
+        run: |
+          # Use the asset's updated_at, NOT the release's published_at: the
+          # nightly release is updated IN PLACE on every build, so published_at
+          # stays at the original creation time while the assets are replaced.
+          $asset = gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.assets[] | select(.name == "nextar-setup.exe") | .updated_at' 2>$null
+          if (-not $asset) { throw "nightly nextar-setup.exe asset not found - cannot smoke-test" }
+          $published = [DateTime]::Parse($asset)
+          $age = (Get-Date).ToUniversalTime() - $published
+          Write-Host "nightly nextar-setup.exe updated: $published (age $([math]::Round($age.TotalHours,1))h)"
+          if ($age.TotalHours -gt 26) {
+            throw "nightly installer is $([math]::Round($age.TotalHours,1))h old - the nightly workflow likely failed. Refusing to smoke-test a stale artifact."
+          }
+
       - name: Download the latest nightly installer
         shell: pwsh
         run: |

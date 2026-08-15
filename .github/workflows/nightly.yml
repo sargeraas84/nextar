@@ -191,3 +191,40 @@ jobs:
           files: |
             assets/nextar-setup.exe
             assets/nextar-macos.dmg
+
+      # Post-publish guard: softprops only verifies the LOCAL files matched.
+      # This asserts the release actually serves them - both stable download
+      # URLs must answer 200 and the release must carry exactly the two
+      # expected assets - so a regression like the dist/-prefix bug fails the
+      # nightly run instead of silently shipping a 404 to the landing page
+      # and the smoke runner.
+      - name: Verify nightly release serves the assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Releases are visible to the API/downloads almost immediately, but
+          # retry briefly in case of propagation lag.
+          EXE_CODE=000
+          DMG_CODE=000
+          for _ in $(seq 1 10); do
+            EXE_CODE=$(curl -sIL -o /dev/null -w '%{http_code}' "https://github.com/${{ github.repository }}/releases/download/nightly/nextar-setup.exe")
+            DMG_CODE=$(curl -sIL -o /dev/null -w '%{http_code}' "https://github.com/${{ github.repository }}/releases/download/nightly/nextar-macos.dmg")
+            [ "$EXE_CODE" = "200" ] && [ "$DMG_CODE" = "200" ] && break
+            sleep 5
+          done
+          echo "nextar-setup.exe -> $EXE_CODE"
+          echo "nextar-macos.dmg  -> $DMG_CODE"
+          [ "$EXE_CODE" = "200" ] || { echo "::error::nightly nextar-setup.exe download returned $EXE_CODE"; exit 1; }
+          [ "$DMG_CODE" = "200" ] || { echo "::error::nightly nextar-macos.dmg download returned $DMG_CODE"; exit 1; }
+
+          gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.assets[].name' > /tmp/nightly-assets.txt
+          echo "--- release assets ---"
+          cat /tmp/nightly-assets.txt
+          grep -qx 'nextar-setup.exe' /tmp/nightly-assets.txt || { echo "::error::nextar-setup.exe missing from nightly release"; exit 1; }
+          grep -qx 'nextar-macos.dmg' /tmp/nightly-assets.txt || { echo "::error::nextar-macos.dmg missing from nightly release"; exit 1; }
+          COUNT=$(wc -l < /tmp/nightly-assets.txt)
+          echo "asset count: $COUNT"
+          [ "$COUNT" -eq 2 ] || { echo "::error::expected exactly 2 nightly assets, found $COUNT"; exit 1; }
+          echo "✅ nightly release verified: 2 assets, both downloads 200"
