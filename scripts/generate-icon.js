@@ -3,13 +3,12 @@
 // nextar icon generator — zero dependencies, pure Node.
 // Produces resources/nextar.ico (16/24/32/48/64/128/256) plus a 256px PNG.
 //
-// Design: a CLEAN VECTOR mark. A rounded-square tile with a smooth glass
-// gradient and a crisp hairline bezel carries the heavy chrome " >> "
-// double chevron. Each chevron is an exact mitered vector polygon — the
-// two bars' flat-cut ends meet at a true mitered point (no rounded caps,
-// no seams), filled with one smooth linear gradient (steel base → bright
-// tip). No texture, no noise, no glows: pure geometry, like a proper
-// vector logo.
+// Design: a CLEAN VECTOR mark — the "convergence core". A circular glass
+// tile with a neon-cyan ring carries THREE nested chevron planes that fold
+// inward (outer electric violet → inner electric cyan) and feed a bright
+// core node with a soft cyan glow: files, folders and data streams being
+// compressed into one compact, intelligent point. Pure geometry, no
+// texture or noise — reads at 16px and up.
 //
 // `--dark` renders the deep-navy glass variant (nextar-dark.ico/.png);
 // the app painter swaps palettes at runtime based on the Windows theme.
@@ -160,85 +159,12 @@ function distPoly(px, py, P) {
   return pointInPoly(px, py, P) ? -dmin : dmin;
 }
 
-// Intersection of line (p, dir u) and line (q, dir v).
-function lineInt(p, ux, uy, q, vx, vy) {
-  const denom = ux * vy - uy * vx;
-  if (Math.abs(denom) < 1e-9) return [p[0] + ux, p[1] + uy];
-  const wx = q[0] - p[0];
-  const wy = q[1] - p[1];
-  const t = (wx * vy - wy * vx) / denom;
-  return [p[0] + ux * t, p[1] + uy * t];
-}
 
-// One chevron as a mitered hexagon. A = top bar start, B = bottom bar
-// start, T = where the centerlines meet, hw = half bar width (device px).
-// The hexagon [am, o, bp, bm, i, ap]:
-//   am  top bar upper (outer) edge start
-//   o   tip — where the two outer edges meet (past T, mitered point)
-//   bp  bottom bar lower (outer) edge start
-//   bm  bottom bar upper (inner) edge start
-//   i   notch — where the two inner edges meet (the ">" opening)
-//   ap  top bar lower (inner) edge start
-// This is exactly an SVG stroke with stroke-linejoin="miter": crisp flat
-// bar ends, a true point at the tip, and no seams between the bars.
-function chevronHex(a, b, t, hw) {
-  const d1x = t[0] - a[0];
-  const d1y = t[1] - a[1];
-  const d2x = t[0] - b[0];
-  const d2y = t[1] - b[1];
-  const l1 = Math.hypot(d1x, d1y) || 1;
-  const l2 = Math.hypot(d2x, d2y) || 1;
-  const u1x = d1x / l1;
-  const u1y = d1y / l1;
-  const u2x = d2x / l2;
-  const u2y = d2y / l2;
-  const n1x = -u1y;
-  const n1y = u1x; // perp of d1 (points down/right for a down-right bar)
-  const n2x = -u2y;
-  const n2y = u2x; // perp of d2
-  const ap = [a[0] + n1x * hw, a[1] + n1y * hw]; // top bar lower (inner) edge start
-  const am = [a[0] - n1x * hw, a[1] - n1y * hw]; // top bar upper (outer) edge start
-  const bp = [b[0] + n2x * hw, b[1] + n2y * hw]; // bottom bar lower (outer) edge start
-  const bm = [b[0] - n2x * hw, b[1] - n2y * hw]; // bottom bar upper (inner) edge start
-  const o = lineInt(am, u1x, u1y, bp, u2x, u2y); // tip — the two OUTER edges meet
-  const i = lineInt(ap, u1x, u1y, bm, u2x, u2y); // notch — the two INNER edges meet
-  return {
-    hex: [am, o, bp, bm, i, ap],
-    a,
-    b,
-    u1x,
-    u1y,
-    l1,
-    u2x,
-    u2y,
-    l2,
-    n1x,
-    n1y,
-    n2x,
-    n2y,
-  };
-}
 
-// Per-pixel color of a chevron: coverage + one smooth along-bar gradient
-// (steel base → bright tip). Negative distance = inside = full coverage.
-// The pixel's color follows whichever bar it's closest to, so the gradient
-// flows along each bar and meets seamlessly at the shared tip.
-function chevronAt(px, py, ch, base, tip) {
-  const d = distPoly(px, py, ch.hex);
-  const dt = Math.abs((px - ch.a[0]) * ch.n1x + (py - ch.a[1]) * ch.n1y);
-  const db = Math.abs((px - ch.b[0]) * ch.n2x + (py - ch.b[1]) * ch.n2y);
-  let t;
-  if (dt <= db) {
-    t = clamp01(((px - ch.a[0]) * ch.u1x + (py - ch.a[1]) * ch.u1y) / ch.l1);
-  } else {
-    t = clamp01(((px - ch.b[0]) * ch.u2x + (py - ch.b[1]) * ch.u2y) / ch.l2);
-  }
-  return { cov: cover(d), c: mixc(base, tip, t) };
-}
-
-// Two palettes: clean frosted-glass light tile + dark gunmetal chrome, and
-// the deep-navy glass variant + white-hot chrome for Windows dark mode.
-// Colors match the Rust painters (nextar-gui / setup).
+// Two palettes: clean frosted-glass light tile + deep-navy glass for
+// Windows dark mode. The converging planes run violet → indigo → cyan in
+// both, tuned for contrast against each tile. Colors match the Rust
+// painters (nextar-gui / setup).
 function palette(dark) {
   if (dark) {
     return {
@@ -246,12 +172,12 @@ function palette(dark) {
       tileB: [0x14, 0x2b, 0x52], // mid navy
       tileC: [0x1c, 0x3a, 0x6a], // deeper blue bottom
       tileMag: [0xff, 0x2b, 0xd6], // soft pink bottom reflection
-      backA: [0x1d, 0x33, 0x4c], // back chevron — dim, receding cool steel
-      backB: [0x5c, 0x8f, 0xad], // back chevron tip — muted cyan steel
-      frontA: [0x2c, 0x3a, 0x50], // front chevron — cool gunmetal (base)
-      frontB: [0xf4, 0xf8, 0xfc], // front chevron tip — white-hot chrome
-      lit: [0x8a, 0xe8, 0xff], // cyan lit-chrome edge highlight
-      bezel: [0x5e, 0xf2, 0xff, 235], // neon ice-cyan ring (matches lit-chrome)
+      layerA: [0x8b, 0x5c, 0xf6], // outer plane — electric violet
+      layerB: [0x5a, 0x7c, 0xf8], // mid plane — neon indigo
+      layerC: [0x37, 0xe6, 0xff], // inner plane — electric cyan
+      core: [0x5e, 0xf2, 0xff], // core node — ice cyan
+      glow: [0x5e, 0xf2, 0xff, 150], // cyan core glow (with alpha)
+      bezel: [0x5e, 0xf2, 0xff, 235], // neon ice-cyan ring
     };
   }
   return {
@@ -259,12 +185,12 @@ function palette(dark) {
     tileB: [0xe0, 0xee, 0xf9], // pale cyan mid
     tileC: [0xbf, 0xd9, 0xf0], // cool blue bottom
     tileMag: [0xff, 0x9e, 0xe6], // soft pink glass reflection
-    backA: [0x21, 0x36, 0x4e], // back chevron — dim, receding cool steel
-    backB: [0x66, 0xa0, 0xbe], // back chevron tip — muted cyan steel
-    frontA: [0x19, 0x23, 0x37], // front chevron — deep cool gunmetal (base)
-    frontB: [0xd8, 0xe2, 0xec], // front chevron tip — bright cool silver
-    lit: [0x9d, 0xee, 0xff], // cyan lit-chrome edge highlight
-    bezel: [0x00, 0xd9, 0xff, 230], // neon cyan ring (matches lit-chrome)
+    layerA: [0x6b, 0x33, 0xb8], // outer plane — deep violet (contrast on white)
+    layerB: [0x2f, 0x5f, 0xc8], // mid plane — indigo
+    layerC: [0x00, 0x8f, 0xc7], // inner plane — cyan
+    core: [0x00, 0xa8, 0xdd], // core node — cyan
+    glow: [0x00, 0xb3, 0xe6, 120], // cyan core glow (with alpha)
+    bezel: [0x00, 0xd9, 0xff, 230], // neon cyan ring
   };
 }
 
@@ -275,14 +201,17 @@ function renderIcon(size, ss, dark) {
   const P = size * SS; // pixel scale for 0..1 units
 
   const pal = palette(!!dark);
-  const B = (u, v) => [u * P, v * P];
-  // Mark geometry (unit coords, y down): back chevron receding left, front
-  // chevron hero right. Mitered hexagons, tip and notch computed exactly.
-  // The chevrons are scaled up to fill the circular tile (the circle
-  // inscribed in the 0.06..0.94 content box, radius 0.44): front tip at
-  // ~68% of the circle radius, bar ends tucked inside the rim.
-  const backCh = chevronHex(B(0.125, 0.365), B(0.125, 0.635), B(0.345, 0.5), 0.038 * P);
-  const frontCh = chevronHex(B(0.485, 0.315), B(0.485, 0.685), B(0.795, 0.5), 0.075 * P);
+  // Convergence-core mark geometry (unit coords, y down). Three nested
+  // chevron planes fold inward — outer violet → inner cyan — and feed a
+  // bright core node: files/streams compressed into one intelligent point.
+  const ux = (v) => (0.06 + 0.88 * v) * P;
+  const uy = (t) => (0.06 + 0.88 * t) * P;
+  const planes = [
+    { reach: 0.300, top: 0.240, apex: 0.520, hw: 0.030, col: pal.layerA },
+    { reach: 0.215, top: 0.360, apex: 0.610, hw: 0.028, col: pal.layerB },
+    { reach: 0.130, top: 0.470, apex: 0.680, hw: 0.026, col: pal.layerC },
+  ];
+  const core = { cx: ux(0.5), cy: uy(0.735), r: 0.050 * 0.88 * P, gr: 0.085 * 0.88 * P };
   const bezelW = 0.018 * P;
 
   const paint = (acc, i, cov, rgb, alpha) => {
@@ -319,25 +248,33 @@ function renderIcon(size, ss, dark) {
       const bezelCov = cover(dT) * (1 - cover(dT + bezelW));
       paint(acc, i, bezelCov, pal.bezel.slice(0, 3), pal.bezel[3] / 255);
 
-      // --- mark: back chevron first, front chevron over it ---
-      const bk = chevronAt(px, py, backCh, pal.backA, pal.backB);
-      if (bk.cov > 0) paint(acc, i, bk.cov * tCov, bk.c, 1);
-      const fr = chevronAt(px, py, frontCh, pal.frontA, pal.frontB);
-      if (fr.cov > 0) paint(acc, i, fr.cov * tCov, fr.c, 1);
+      // --- mark: three converging chevron planes (violet → cyan), each a
+      //      rounded V-stroke; the fold narrows and brightens toward the core ---
+      for (const pl of planes) {
+        const lx = ux(0.5 - pl.reach);
+        const ly = uy(pl.top);
+        const ax = ux(0.5);
+        const ay = uy(pl.apex);
+        const rx = ux(0.5 + pl.reach);
+        const ry = uy(pl.top);
+        const d = Math.min(segDist(px, py, lx, ly, ax, ay), segDist(px, py, ax, ay, rx, ry)) - pl.hw * 0.88 * P;
+        const cov = cover(d);
+        if (cov > 0) paint(acc, i, cov * tCov, pl.col, 1);
+      }
 
-      // subtle cyan lit-chrome edge along the front chevron's upper bars
-      // (top bar's outer edge am→o, bottom bar's inner edge bm→o): a thin
-      // band just inside each edge, positive signed distance into the bar.
-      const edgeW = 0.022 * P;
-      const am = frontCh.hex[0];
-      const bm = frontCh.hex[3];
-      const sTop = frontCh.u1x * (py - am[1]) - frontCh.u1y * (px - am[0]);
-      const sBot = -(frontCh.u2x * (py - bm[1]) - frontCh.u2y * (px - bm[0]));
-      const band = Math.max(
-        cover(-sTop) * (1 - cover(-sTop + edgeW)),
-        cover(-sBot) * (1 - cover(-sBot + edgeW))
-      );
-      if (band > 0) paint(acc, i, fr.cov * tCov * band, pal.lit, 0.5);
+      // --- mark: core node — soft cyan glow, bright dot, white inner spark ---
+      const dCore = sdCircle(px, py, core.cx, core.cy, core.r);
+      const glow = Math.exp(-Math.max(0, dCore) / (core.gr * 0.35));
+      if (glow > 0.01) {
+        paint(acc, i, glow * tCov, pal.glow.slice(0, 3), (pal.glow[3] / 255) * 0.6);
+      }
+      const cCov = cover(dCore);
+      if (cCov > 0) {
+        paint(acc, i, cCov * tCov, pal.core, 1);
+        const dSpark = Math.hypot(px - core.cx, py - (core.cy - core.r * 0.25)) - core.r * 0.38;
+        const sCov = cover(dSpark);
+        if (sCov > 0) paint(acc, i, sCov * cCov * tCov, [0xff, 0xff, 0xff], 0.9);
+      }
     }
   }
 
@@ -389,7 +326,8 @@ function main() {
 if (require.main === module) {
   main();
 } else {
-  // Reusable by other tooling (e.g. scripts/build-icns.js):
-  // renderIcon(size, supersample, dark) -> { size, rgba, png }.
-  module.exports = { renderIcon, palette };
+  // Reusable by other tooling (e.g. scripts/build-icns.js and
+  // scripts/build-site-assets.js): renderIcon(size, supersample, dark) ->
+  // { size, rgba, png }, plus the raw PNG encoder for compositing.
+  module.exports = { renderIcon, palette, encodePNG };
 }

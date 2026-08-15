@@ -1,0 +1,88 @@
+name: pages
+
+# Deploys the marketing site (site/) to GitHub Pages on every push to master
+# and on manual dispatch. The landing page's brand assets are procedural —
+# favicon.ico, og-image.png, the PWA icons and manifest.json are all generated
+# from the convergence-core mark — so they are regenerated here before upload,
+# guaranteeing the deployed page always carries the current logo/wordmark.
+#
+# Deploys to https://<owner>.github.io/<repo>/ (project Pages) or the custom
+# domain configured in the repo's Pages settings. The page's getRepo() script
+# derives the repo from the serving host, so the download cards keep pointing
+# at the correct nightly release URLs either way.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Pages needs the repo's Pages write permission + an OIDC token to publish.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; superseded runs are not cancelled mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Regenerate the mark-derived assets so the deployed favicon, og:image,
+      # PWA icons and manifest always match the current logo. generate-icon.js
+      # first refreshes resources/nextar.ico (the favicon source); the fonts
+      # used by the og:image wordmark live in resources/fonts/.
+      - name: Regenerate site assets
+        run: |
+          node scripts/generate-icon.js
+          node scripts/build-site-assets.js
+
+      # Open Graph scrapers (Twitter, Facebook, Slack, …) need an absolute
+      # og:image/twitter:image URL — the committed copy is relative so local
+      # previews work. Rewrite it here to the canonical Pages origin. Set a
+      # SITE_URL repository variable (e.g. https://nextar.app) to override the
+      # default project-Pages URL for a custom domain.
+      - name: Absolutize og:image for social scrapers
+        env:
+          REPO: ${{ github.repository }}
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "site/index.html";
+            let s = fs.readFileSync(p, "utf8");
+            let base = (process.env.SITE_URL || "").trim();
+            if (!base) {
+              const [owner, repo] = (process.env.REPO || "nextar/nextar").split("/");
+              base = `https://${owner}.github.io/${repo}`;
+            }
+            base = base.replace(/\/+$/, "");
+            s = s.replace(/content="og-image\.png"/g, `content="${base}/og-image.png"`);
+            fs.writeFileSync(p, s);
+            console.log("og:image → " + base + "/og-image.png");
+          '
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

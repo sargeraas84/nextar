@@ -1,0 +1,153 @@
+name: nightly
+
+# Publishes a rolling "nightly" build to a GitHub Release tagged `nightly`
+# on every push to master. Asset names are FIXED (`nextar-setup.exe`,
+# `nextar-macos.dmg`), so the landing page can link the latest build with a
+# stable URL:
+#
+#   https://github.com/<owner>/<repo>/releases/download/nightly/nextar-setup.exe
+#   https://github.com/<owner>/<repo>/releases/download/nightly/nextar-macos.dmg
+#
+# The tag/release is updated in place on each run (overwrite: true), so the
+# URLs always serve the newest build. The release body carries the commit
+# subject, test results and SHA-256 checksums (read by the landing page's
+# live badges). Versioned builds ship separately via the release workflow.
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Tests must pass (bash -e fails the step otherwise); the summary is
+      # captured for the release body.
+      - name: Run tests and collect summary
+        shell: bash
+        run: |
+          cargo test > "$RUNNER_TEMP/tests.log" 2>&1
+          cargo test --manifest-path setup/Cargo.toml >> "$RUNNER_TEMP/tests.log" 2>&1
+          grep -h '^test result:' "$RUNNER_TEMP/tests.log" | sed 's/^test result: //' > summary-windows.txt
+          cat summary-windows.txt
+
+      - name: Build installer distribution
+        shell: bash
+        run: bash scripts/package.sh
+
+      - name: Checksum the installer
+        shell: pwsh
+        run: |
+          $h = Get-FileHash dist/nextar-setup.exe -Algorithm SHA256
+          '{0}  nextar-setup.exe' -f $h.Hash.ToLower() | Set-Content nextar-setup.exe.sha256
+          Get-Content nextar-setup.exe.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-windows
+          path: |
+            dist/nextar-setup.exe
+            summary-windows.txt
+            nextar-setup.exe.sha256
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests and collect summary
+        shell: bash
+        run: |
+          cargo test > "$RUNNER_TEMP/tests.log" 2>&1
+          grep -h '^test result:' "$RUNNER_TEMP/tests.log" | sed 's/^test result: //' > summary-macos.txt
+          cat summary-macos.txt
+
+      - name: Build the .dmg
+        run: bash installers/macos/build-dmg.sh
+
+      # Fixed asset name so the nightly download URL never changes across
+      # versions (the dmg pipeline names it nextar-<version>-macos.dmg).
+      - name: Normalize the dmg name
+        run: |
+          mv dist/*.dmg dist/nextar-macos.dmg
+          ls -la dist/nextar-macos.dmg
+
+      - name: Checksum the dmg
+        shell: bash
+        run: |
+          shasum -a 256 dist/nextar-macos.dmg | awk '{print $1"  nextar-macos.dmg"}' > nextar-macos.dmg.sha256
+          cat nextar-macos.dmg.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-macos
+          path: |
+            dist/nextar-macos.dmg
+            summary-macos.txt
+            nextar-macos.dmg.sha256
+
+  # Creates (or updates in place) the nightly release with both artifacts
+  # and a rich body: commit subject, test results, SHA-256 checksums.
+  publish:
+    runs-on: ubuntu-latest
+    needs: [windows, macos]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-windows
+          path: assets/
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-macos
+          path: assets/
+
+      - name: Assemble release body
+        shell: bash
+        env:
+          SHA: ${{ github.sha }}
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          SUBJECT="$(printf '%s' "$MSG" | head -n1)"
+          SHORT="${SHA:0:7}"
+          WIN_TESTS="$(awk 'NR>1{printf " | "} {printf "%s", $0} END{print ""}' assets/summary-windows.txt)"
+          MAC_TESTS="$(awk 'NR>1{printf " | "} {printf "%s", $0} END{print ""}' assets/summary-macos.txt)"
+          WIN_SHA="$(awk '{print $1}' assets/nextar-setup.exe.sha256)"
+          MAC_SHA="$(awk '{print $1}' assets/nextar-macos.dmg.sha256)"
+          cat > body.md <<EOF
+          Rolling build from \`master\` — ${SUBJECT}
+
+          - commit: ${SHA}
+          - subject: ${SUBJECT}
+          - run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          **tests**
+          - windows: ${WIN_TESTS}
+          - macos: ${MAC_TESTS}
+
+          **checksums (SHA-256)**
+          - nextar-setup.exe: ${WIN_SHA}
+          - nextar-macos.dmg: ${MAC_SHA}
+          EOF
+          echo "--- body.md ($(wc -c < body.md) bytes) ---"
+          cat body.md
+
+      - name: Publish nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: nextar nightly
+          prerelease: true
+          overwrite: true
+          body_path: ${{ github.workspace }}/body.md
+          files: |
+            assets/nextar-setup.exe
+            assets/nextar-macos.dmg

@@ -28,6 +28,27 @@ jobs:
         with:
           components: clippy
 
+      # The logo is procedural (scripts/generate-icon.js); regenerate the
+      # embedded .ico + the marketing-site favicon/og:image/PWA icons so any
+      # mark change flows through to packaging and the landing page.
+      - name: Regenerate icons + site assets
+        run: |
+          node scripts/generate-icon.js
+          node scripts/generate-icon.js --dark
+          node scripts/build-site-assets.js
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-assets
+          path: |
+            site/favicon.ico
+            site/og-image.png
+            site/icon-192.png
+            site/icon-512.png
+            site/apple-touch-icon.png
+            site/manifest.json
+          if-no-files-found: error
+
       - name: Build release binaries (engine + GUI)
         run: cargo build --release --bin nextar --bin nextar-gui
 

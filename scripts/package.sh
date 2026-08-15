@@ -6,6 +6,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+echo "==> regenerating icons + site assets (mark is the source of truth)"
+node scripts/generate-icon.js
+node scripts/generate-icon.js --dark
+node scripts/build-site-assets.js
+
 echo "==> building nextar + nextar-gui (release)"
 cargo build --release --bin nextar --bin nextar-gui
 
