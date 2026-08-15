@@ -16,3 +16,6 @@ Desktop.ini
 *.swp
 .idea/
 .vscode/
+
+# Dev-only screenshot capture tooling
+/_shots

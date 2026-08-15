@@ -90,7 +90,9 @@ fn current_palette() -> Palette {
 fn refresh_palette() {
     let b = theme_blend();
     let mut g = CURRENT_PALETTE.lock().unwrap_or_else(|p| p.into_inner());
-    *g = blend_ui(UI_DARK, UI_LIGHT, b);
+    // blend_ui(a, b, t) lerps a → b as t goes 0 → 1, so pass (LIGHT, DARK):
+    // b=0 (light mode) yields the light palette, b=1 (dark) the dark one.
+    *g = blend_ui(UI_LIGHT, UI_DARK, b);
 }
 
 fn blend_ui(a: Palette, b: Palette, t: f32) -> Palette {
@@ -3984,7 +3986,14 @@ fn configure_theme(ctx: &egui::Context) {
     style.spacing.item_spacing = Vec2::new(8.0, 8.0);
     style.spacing.button_padding = Vec2::new(16.0, 8.0);
     style.spacing.slider_width = 190.0;
-    ctx.set_style_of(egui::Theme::Dark, style);
+    // Register the palette-derived style for BOTH themes (the OS may be in
+    // the opposite theme to the app's), then pin the active egui theme to
+    // match the palette so built-in widgets (TextEdit, ComboBox, …) follow
+    // the app's dark/light look instead of the Windows theme.
+    ctx.set_style_of(egui::Theme::Dark, style.clone());
+    ctx.set_style_of(egui::Theme::Light, style);
+    let theme = if theme_blend() > 0.5 { egui::Theme::Dark } else { egui::Theme::Light };
+    ctx.set_theme(theme);
 }
 
 // ---------------------------------------------------------------- shell mode

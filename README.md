@@ -21,6 +21,18 @@ $ nextar extract photos.next -p 'secret'
 $ nextar repair damaged.next --volumes photos.next.nvol
 ```
 
+## Screenshots
+
+![Home](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-home.png)
+
+| Create | Extract | Inspect |
+|---|---|---|
+| ![Create](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-create.png) | ![Extract](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-extract.png) | ![Inspect](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-inspect.png) |
+
+| Repair | Settings |
+|---|---|
+| ![Repair](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-repair.png) | ![Settings](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-settings.png) |
+
 ## Desktop app (nextar-gui)
 
 The repo also ships a modern desktop front-end (`cargo run --release --bin
