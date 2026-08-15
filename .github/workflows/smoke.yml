@@ -32,6 +32,8 @@ jobs:
       # Same freshness guard as the Windows job, against the dmg asset.
       - name: Assert the nightly dmg is fresh
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Asset updated_at, NOT release published_at: the nightly release
           # is updated in place, so published_at stays at first creation while
@@ -74,6 +76,8 @@ jobs:
       # the newest one.
       - name: Assert the nightly release is fresh
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Use the asset's updated_at, NOT the release's published_at: the
           # nightly release is updated IN PLACE on every build, so published_at
