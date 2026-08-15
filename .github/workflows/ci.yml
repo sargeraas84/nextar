@@ -86,6 +86,16 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-shell-test.ps1 -Deep -InstallDir "$env:RUNNER_TEMP\nextar-ci"
 
+      # Isolated installer lifecycle: install → upgrade → uninstall into a
+      # throwaway prefix using --no-shell, so the payload path is exercised
+      # without disturbing the shell integration registered above. The E2E
+      # snapshots the uninstall entry + Start Menu shortcut and asserts they
+      # are untouched by the cycle.
+      - name: Installer E2E - install, upgrade, uninstall
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -OnlyInstaller -SetupExe "setup\target\release\nextar-setup.exe"
+
   # macOS: cross-platform packaging. The engine + GUI are fully portable
   # (Windows-only bits - registry theme detection, DWM title bar/corners,
   # shell integration - are #[cfg(windows)] and compile away); the .dmg
@@ -106,15 +116,13 @@ jobs:
       - name: Build the .dmg pipeline
         run: bash installers/macos/build-dmg.sh
 
-      - name: Verify the disk image mounts and contains the app
+      # Packaging lifecycle: mount the dmg, install nextar.app + the CLI
+      # into a throwaway Applications dir, upgrade in place, then uninstall.
+      - name: Installer E2E - mount, install, upgrade, uninstall
         run: |
           DMG=$(ls dist/*.dmg)
           echo "artifact: $DMG"
-          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint /tmp/nextar-dmg
-          test -d /tmp/nextar-dmg/nextar.app && echo "nextar.app present"
-          test -x /tmp/nextar-dmg/nextar && echo "CLI present"
-          ls /tmp/nextar-dmg
-          hdiutil detach /tmp/nextar-dmg
+          bash installers/macos/verify-install.sh "$DMG"
 
       - uses: actions/upload-artifact@v4
         with:

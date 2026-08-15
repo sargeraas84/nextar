@@ -42,6 +42,17 @@ The script:
 4. Stages a dmg volume (`nextar.app` + `nextar` CLI + `README.txt`) and
    creates a compressed read-only image with `hdiutil create -format UDZO`.
 
+## Test the install lifecycle (E2E)
+
+```bash
+./installers/macos/verify-install.sh dist/nextar-0.1.0-macos.dmg
+```
+
+Mounts the dmg, installs `nextar.app` + the CLI into a throwaway
+`Applications` dir, verifies the bundle structure, upgrades in place, then
+uninstalls — without touching your real `~/Applications`. It runs in CI after
+every `.dmg` build.
+
 ## First launch
 
 The app is not notarized yet. If Gatekeeper blocks it, right-click

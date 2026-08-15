@@ -462,7 +462,7 @@ fn shortcut_paths() -> (PathBuf, PathBuf) {
     (start_dir.join("nextar.lnk"), desktop.join("nextar.lnk"))
 }
 
-fn install_actions(prefix: &Path, opts: &InstallOpts) -> Result<Vec<Act>> {
+fn install_actions(prefix: &Path, opts: &InstallOpts, no_shell: bool) -> Result<Vec<Act>> {
     let exe = prefix.join("nextar.exe");
     let gui = prefix.join("nextar-gui.exe");
     let setup = prefix.join("nextar-setup.exe");
@@ -478,6 +478,13 @@ fn install_actions(prefix: &Path, opts: &InstallOpts) -> Result<Vec<Act>> {
                 acts.push(Act::File { path: setup.clone(), data });
             }
         }
+    }
+
+    // --no-shell: payload only — skip every registry key, shortcut, and
+    // Explorer verb so the installer E2E can exercise the payload lifecycle
+    // in isolation without touching global shell state.
+    if no_shell {
+        return Ok(acts);
     }
 
     // 2) context menus (all through the GUI's `--run` shell mode: no console flash)
@@ -593,9 +600,9 @@ fn install_actions(prefix: &Path, opts: &InstallOpts) -> Result<Vec<Act>> {
     Ok(acts)
 }
 
-fn install(prefix: &Path, dry: bool, quiet: bool) -> Result<()> {
+fn install(prefix: &Path, dry: bool, quiet: bool, no_shell: bool) -> Result<()> {
     let opts = InstallOpts::default();
-    let acts = install_actions(prefix, &opts)?;
+    let acts = install_actions(prefix, &opts, no_shell)?;
     println!("nextar setup v{VERSION} — installing to {}", prefix.display());
     if dry {
         println!("  (dry run — nothing will be changed)");
@@ -603,24 +610,32 @@ fn install(prefix: &Path, dry: bool, quiet: bool) -> Result<()> {
     run(&acts, dry, &AtomicBool::new(false))?;
     if !dry {
         validate_install(prefix)?;
-        notify_shell();
+        if !no_shell {
+            notify_shell();
+        }
     }
     if !dry {
         println!();
         println!("  ✓ nextar.exe + nextar-gui.exe + nextar-setup.exe");
-        if opts.context_menu {
-            println!("  ✓ right-click any file/folder → “Compress to .next” / “Compress to .next and email”");
-            println!("  ✓ right-click a folder → “Extract .next… here”");
-            println!("  ✓ right-click a .next archive → “Open in nextar” / “Extract here” / “Repair with .nvol…”");
-            println!("  ✓ Send To → “Compress to .next” (multi-select)");
+        if !no_shell {
+            if opts.context_menu {
+                println!("  ✓ right-click any file/folder → “Compress to .next” / “Compress to .next and email”");
+                println!("  ✓ right-click a folder → “Extract .next… here”");
+                println!("  ✓ right-click a .next archive → “Open in nextar” / “Extract here” / “Repair with .nvol…”");
+                println!("  ✓ Send To → “Compress to .next” (multi-select)");
+            }
+            if opts.association {
+                println!("  ✓ double-click a .next archive → opens in nextar-gui");
+            }
+            println!("  ✓ uninstall entry registered (Settings → Apps → nextar)");
         }
-        if opts.association {
-            println!("  ✓ double-click a .next archive → opens in nextar-gui");
-        }
-        println!("  ✓ uninstall entry registered (Settings → Apps → nextar)");
         println!();
-        println!("done — right-click anything in Explorer to use nextar.");
-        println!("remove it anytime with: \"{}\" --uninstall", prefix.join("nextar-setup.exe").display());
+        if no_shell {
+            println!("done — payload installed (no shell integration; --no-shell).");
+        } else {
+            println!("done — right-click anything in Explorer to use nextar.");
+            println!("remove it anytime with: \"{}\" --uninstall", prefix.join("nextar-setup.exe").display());
+        }
         if !quiet {
             let text = format!(
                 "nextar is now installed — no admin needed.\n\n\
@@ -639,7 +654,15 @@ fn install(prefix: &Path, dry: bool, quiet: bool) -> Result<()> {
 }
 
 // ------------------------------------------------------------ uninstall
-fn uninstall_actions(prefix: &Path) -> Vec<Act> {
+fn uninstall_actions(prefix: &Path, no_shell: bool) -> Vec<Act> {
+    // --no-shell: remove only the payload files and leave registry keys and
+    // shortcuts untouched (a --no-shell install never created them).
+    if no_shell {
+        return vec![
+            Act::RemoveFile { path: prefix.join("nextar.exe") },
+            Act::RemoveFile { path: prefix.join("nextar-gui.exe") },
+        ];
+    }
     let mut acts = vec![Act::Delete { root: Root::Classes, path: MENU_COMPRESS.to_string() }];
     acts.push(Act::Delete { root: Root::Classes, path: MENU_EMAIL.to_string() });
     acts.push(Act::Delete { root: Root::Classes, path: MENU_COMPRESS_DIR.to_string() });
@@ -682,8 +705,8 @@ fn uninstall_actions(prefix: &Path) -> Vec<Act> {
     acts
 }
 
-fn uninstall(prefix: &Path, dry: bool, quiet: bool) -> Result<()> {
-    let acts = uninstall_actions(prefix);
+fn uninstall(prefix: &Path, dry: bool, quiet: bool, no_shell: bool) -> Result<()> {
+    let acts = uninstall_actions(prefix, no_shell);
     println!("nextar uninstall — removing from {}", prefix.display());
     if dry {
         println!("  (dry run — nothing will be changed)");
@@ -691,7 +714,9 @@ fn uninstall(prefix: &Path, dry: bool, quiet: bool) -> Result<()> {
     run(&acts, dry, &AtomicBool::new(false))?;
 
     if !dry {
-        notify_shell();
+        if !no_shell {
+            notify_shell();
+        }
         let self_ok = std::env::current_exe().map(|s| s == prefix.join("nextar-setup.exe")).unwrap_or(false);
         if self_ok {
             // The running exe locks itself; a detached PowerShell removes the
@@ -714,9 +739,11 @@ fn uninstall(prefix: &Path, dry: bool, quiet: bool) -> Result<()> {
             let _ = std::fs::remove_dir(prefix);
         }
         println!();
-        println!("  ✓ context menus removed");
-        println!("  ✓ file association removed");
-        println!("  ✓ uninstall entry removed");
+        if !no_shell {
+            println!("  ✓ context menus removed");
+            println!("  ✓ file association removed");
+            println!("  ✓ uninstall entry removed");
+        }
         println!("done — nextar has been removed.");
         if !quiet {
             msgbox("nextar removed", "nextar has been uninstalled.\n\nRight-click menus and the .next file association are gone.");
@@ -1674,7 +1701,7 @@ impl Wizard {
             let res: Result<String> = (|| {
                 match mode {
                     Mode::Install => {
-                        let acts = install_actions(&prefix, &opts)?;
+                        let acts = install_actions(&prefix, &opts, false)?;
                         run(&acts, false, &cancel)?;
                         validate_install(&prefix)?;
                         Ok(format!(
@@ -1685,7 +1712,7 @@ impl Wizard {
                         ))
                     }
                     Mode::Uninstall => {
-                        let acts = uninstall_actions(&prefix);
+                        let acts = uninstall_actions(&prefix, false);
                         run(&acts, false, &cancel)?;
                         Ok("nextar has been uninstalled.".to_string())
                     }
@@ -1972,18 +1999,21 @@ fn main() -> Result<()> {
     }
     if args.iter().any(|a| a == "--help" || a == "-h") {
         println!("nextar-setup v{VERSION}");
-        println!("usage: nextar-setup [--uninstall] [--prefix <dir>] [--dry-run] [--quiet]");
+        println!("usage: nextar-setup [--uninstall] [--prefix <dir>] [--dry-run] [--quiet] [--no-shell]");
         println!("  (no args)   open the GUI installer wizard");
         println!("  --uninstall open the GUI uninstaller");
         println!("  --prefix    install into <dir> instead of %LOCALAPPDATA%\\nextar");
         println!("  --dry-run   print what would be done without changing anything");
         println!("  --quiet     no confirmation dialogs (for scripts)");
+        println!("  --no-shell  payload only: no registry keys, shortcuts, or Explorer verbs");
         return Ok(());
     }
 
     let dry = args.iter().any(|a| a == "--dry-run");
-    let quiet = args.iter().any(|a| a == "--quiet" || a == "-q");
     let uninst = args.iter().any(|a| a == "--uninstall");
+    let no_shell = args.iter().any(|a| a == "--no-shell");
+    // --no-shell is a scripting flag: it implies no confirmation dialogs.
+    let quiet = args.iter().any(|a| a == "--quiet" || a == "-q") || no_shell;
     // Normalize forward slashes (e.g. `--prefix "D:/stuff"` from a POSIX
     // shell): the verb commands embed this path, and Explorer refuses to
     // spawn an executable with mixed separators.
@@ -1992,11 +2022,11 @@ fn main() -> Result<()> {
         .unwrap_or_else(default_install_dir);
 
     // Console mode for scripts/tests: any explicit flag keeps us headless.
-    if dry || quiet || args.iter().any(|a| a == "--prefix") {
+    if dry || quiet || no_shell || args.iter().any(|a| a == "--prefix") {
         if prefix.as_os_str().is_empty() {
             bail!("empty install prefix");
         }
-        let res = if uninst { uninstall(&prefix, dry, quiet) } else { install(&prefix, dry, quiet) };
+        let res = if uninst { uninstall(&prefix, dry, quiet, no_shell) } else { install(&prefix, dry, quiet, no_shell) };
         if let Err(e) = &res {
             if !quiet {
                 msgbox("nextar setup", &format!("Something went wrong:\n\n{e:#}\n\nSee the console output for details."));
@@ -2163,5 +2193,33 @@ mod tests {
         assert!(!inside(egui::pos2(98.0, 2.0)), "top-right corner should be empty");
         assert!(!inside(egui::pos2(2.0, 98.0)), "bottom-left corner should be empty");
         assert!(!inside(egui::pos2(98.0, 98.0)), "bottom-right corner should be empty");
+    }
+
+    #[test]
+    fn no_shell_install_is_payload_only() {
+        let acts = install_actions(Path::new("C:\\tmp\\nextar-test"), &InstallOpts::default(), true).unwrap();
+        // nextar.exe + nextar-gui.exe + the copied nextar-setup.exe — no
+        // registry, shortcut, association, or uninstall-entry actions.
+        assert_eq!(acts.len(), 3);
+        for a in &acts {
+            assert!(
+                matches!(a, Act::File { path, .. } if path.to_string_lossy().ends_with(".exe")),
+                "expected only payload File actions, got: {}",
+                act_short(a)
+            );
+        }
+    }
+
+    #[test]
+    fn no_shell_uninstall_is_payload_only() {
+        let acts = uninstall_actions(Path::new("C:\\tmp\\nextar-test"), true);
+        assert_eq!(acts.len(), 2);
+        for a in &acts {
+            assert!(
+                matches!(a, Act::RemoveFile { path } if path.to_string_lossy().ends_with("nextar.exe") || path.to_string_lossy().ends_with("nextar-gui.exe")),
+                "expected only payload RemoveFile actions, got: {}",
+                act_short(a)
+            );
+        }
     }
 }

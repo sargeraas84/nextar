@@ -11,6 +11,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Run
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -OnlyInstaller -SetupExe <path>
 #
 # Exit code: 0 = all checks passed, 1 = one or more failed.
 
@@ -18,6 +19,7 @@ param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'nextar'),
     [switch]$Run,        # invoke verbs for real (brief progress windows open)
     [switch]$Installer,  # headless installer E2E: install, upgrade, uninstall
+    [switch]$OnlyInstaller,  # skip registry/explorer checks; run only the E2E
     [string]$SetupExe = ''  # explicit nextar-setup.exe path for the installer E2E
 )
 $ErrorActionPreference = 'Stop'
@@ -39,13 +41,16 @@ function Check([string]$name, [bool]$ok, [string]$detail = '') {
 Write-Host "nextar shell integration - verifying install at $InstallDir"
 $gui = Join-Path $InstallDir 'nextar-gui.exe'
 $cli = Join-Path $InstallDir 'nextar.exe'
-Check "nextar-gui.exe present" (Test-Path $gui)
-Check "nextar.exe present" (Test-Path $cli)
-if (-not (Test-Path $gui)) {
-    Write-Host "nothing to verify - run nextar-setup.exe first" -ForegroundColor Yellow
-    exit 1
+if (-not $OnlyInstaller) {
+    Check "nextar-gui.exe present" (Test-Path $gui)
+    Check "nextar.exe present" (Test-Path $cli)
+    if (-not (Test-Path $gui)) {
+        Write-Host "nothing to verify - run nextar-setup.exe first" -ForegroundColor Yellow
+        exit 1
+    }
 }
 
+if (-not $OnlyInstaller) {
 # ---------------------------------------------------------------- registry
 function VerbOk([string]$root, [string]$verb) {
     # -LiteralPath: the file root is '*' and would be treated as a wildcard,
@@ -250,6 +255,8 @@ if ($Run) {
     }
 }
 
+}  # -OnlyInstaller: skip sections 1-3
+
 # ---------------------------------------------------------------- installer E2E
 if ($Installer) {
     Write-Host "`n-- 4) headless installer E2E (install -> upgrade -> uninstall)" -ForegroundColor Cyan
@@ -266,59 +273,51 @@ if ($Installer) {
     }
     Check "nextar-setup.exe located for E2E" ($null -ne $setup)
 
-    # If a real install exists, the E2E temporarily re-points the global
-    # shell verbs at the temp prefix, so remember to restore it afterwards.
-    $realSetup = Join-Path $InstallDir 'nextar-setup.exe'
-    $hadRealInstall = (Test-Path -LiteralPath $realSetup)
-    $e2e = Join-Path $env:TEMP ("nextar-e2e-" + [guid]::NewGuid().ToString('N'))
+    # Snapshot the global shell state so we can prove --no-shell leaves it
+    # untouched (works whether or not a real install already exists).
+    $unkey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\nextar'
+    $sm = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\nextar.lnk'
+    $locBefore = if (Test-Path -LiteralPath $unkey) { (Get-ItemProperty -LiteralPath $unkey).InstallLocation } else { $null }
+    $smBefore = (Test-Path -LiteralPath $sm)
 
+    $e2e = Join-Path $env:TEMP ("nextar-e2e-" + [guid]::NewGuid().ToString('N'))
     try {
         if ($null -ne $setup) {
             $exe = Join-Path $e2e 'nextar.exe'
             $guiexe = Join-Path $e2e 'nextar-gui.exe'
             $setupexe = Join-Path $e2e 'nextar-setup.exe'
-            $unkey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\nextar'
-            $sm = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\nextar.lnk'
 
-            # 1) install into a fresh temp prefix
-            & $setup --prefix $e2e --quiet 2>&1 | Out-Null
+            # 1) install payload-only into a fresh temp prefix
+            & $setup --prefix $e2e --quiet --no-shell 2>&1 | Out-Null
             Check "install exited 0" ($LASTEXITCODE -eq 0)
             Check "install wrote the three payload exes" ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $guiexe) -and (Test-Path -LiteralPath $setupexe))
-            Check "install registered the uninstall entry" (Test-Path -LiteralPath $unkey)
-            if (Test-Path -LiteralPath $unkey) {
-                $loc = (Get-ItemProperty -LiteralPath $unkey).InstallLocation
-                Check "uninstall InstallLocation points at the prefix" ($loc -eq $e2e)
-            }
-            Check "install created the Start Menu shortcut" (Test-Path -LiteralPath $sm)
+            $loc = if (Test-Path -LiteralPath $unkey) { (Get-ItemProperty -LiteralPath $unkey).InstallLocation } else { $null }
+            Check "install left the uninstall entry untouched" ($loc -eq $locBefore)
+            Check "install left the Start Menu shortcut untouched" ((Test-Path -LiteralPath $sm) -eq $smBefore)
 
             # 2) upgrade in place: re-run install into the same prefix
-            & $setup --prefix $e2e --quiet 2>&1 | Out-Null
+            & $setup --prefix $e2e --quiet --no-shell 2>&1 | Out-Null
             Check "upgrade exited 0" ($LASTEXITCODE -eq 0)
             Check "upgrade kept the payload" ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $guiexe))
-            $lnkCount = @(Get-ChildItem -LiteralPath (Split-Path $sm -Parent) -Filter 'nextar.lnk' -ErrorAction SilentlyContinue).Count
-            Check "upgrade produced no duplicate Start Menu shortcut" ($lnkCount -le 1)
-            if (Test-Path -LiteralPath $unkey) {
-                Check "upgrade kept a single uninstall entry" ((Get-ItemProperty -LiteralPath $unkey).InstallLocation -eq $e2e)
-            }
+            $loc = if (Test-Path -LiteralPath $unkey) { (Get-ItemProperty -LiteralPath $unkey).InstallLocation } else { $null }
+            Check "upgrade left the uninstall entry untouched" ($loc -eq $locBefore)
 
             # 3) uninstall (run from outside the prefix so removal is synchronous)
-            & $setup --prefix $e2e --quiet --uninstall 2>&1 | Out-Null
+            & $setup --prefix $e2e --quiet --no-shell --uninstall 2>&1 | Out-Null
             Check "uninstall exited 0" ($LASTEXITCODE -eq 0)
             Start-Sleep -Milliseconds 500
             Check "uninstall removed the payload exes" ((-not (Test-Path -LiteralPath $exe)) -and (-not (Test-Path -LiteralPath $guiexe)))
-            Check "uninstall removed the uninstall entry" (-not (Test-Path -LiteralPath $unkey))
-            Check "uninstall removed the Start Menu shortcut" (-not (Test-Path -LiteralPath $sm))
+            Check "uninstall removed the temp folder" (-not (Test-Path -LiteralPath $e2e))
+            $loc = if (Test-Path -LiteralPath $unkey) { (Get-ItemProperty -LiteralPath $unkey).InstallLocation } else { $null }
+            Check "uninstall left the uninstall entry untouched" ($loc -eq $locBefore)
+            Check "uninstall left the Start Menu shortcut untouched" ((Test-Path -LiteralPath $sm) -eq $smBefore)
         }
     } finally {
         Remove-Item -LiteralPath $e2e -Recurse -Force -ErrorAction SilentlyContinue
-        if ($hadRealInstall) {
-            & $realSetup --prefix $InstallDir --quiet 2>&1 | Out-Null
-            Write-Host "  (restored shell integration for $InstallDir; desktop-shortcut opt-ins are not restored by the headless defaults)" -ForegroundColor DarkGray
-        }
     }
 }
 
 # ---------------------------------------------------------------- summary
-Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+if ($work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host "`n$($script:pass) passed, $($script:fail) failed" -ForegroundColor $(if ($script:fail -eq 0) { 'Green' } else { 'Red' })
 if ($script:fail -gt 0) { exit 1 } else { exit 0 }
