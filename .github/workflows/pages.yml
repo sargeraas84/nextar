@@ -71,6 +71,11 @@ jobs:
             console.log("og:image → " + base + "/og-image.png");
           '
 
+      # Gate the deploy on a structural check of the page and its generated
+      # assets, so a bad manifest / broken script / missing icon never ships.
+      - name: Smoke-check the landing page
+        run: node scripts/check-site.js
+
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3

@@ -37,6 +37,10 @@ jobs:
           node scripts/generate-icon.js --dark
           node scripts/build-site-assets.js
 
+      # Structural check of the landing page + generated assets on every build.
+      - name: Smoke-check the landing page
+        run: node scripts/check-site.js
+
       - uses: actions/upload-artifact@v4
         with:
           name: site-assets
