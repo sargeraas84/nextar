@@ -63,4 +63,8 @@ jobs:
             gh release upload nightly "staging/$f.png" --clobber
             echo "uploaded $f.png"
           done
+          # The demo GIF is committed (screenshots/nextar-demo.gif); re-upload
+          # it so the nightly gallery URL serves the current branding.
+          gh release upload nightly screenshots/nextar-demo.gif --clobber
+          echo "uploaded nextar-demo.gif"
           gh release view nightly --json assets --jq '[.assets[].name]'

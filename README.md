@@ -25,17 +25,19 @@ $ nextar repair damaged.next --volumes photos.next.nvol
 
 🎬 **Demo** — boot splash → logo entrance → Home → all views:
 
-![nextar demo](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-demo.gif)
+![nextar demo](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-demo.gif)
 
-![Home](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-home.png)
+_Screenshots refresh automatically every night from the nightly build._
+
+![Home](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-home.png)
 
 | Create | Extract | Inspect |
 |---|---|---|
-| ![Create](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-create.png) | ![Extract](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-extract.png) | ![Inspect](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-inspect.png) |
+| ![Create](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-create.png) | ![Extract](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-extract.png) | ![Inspect](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-inspect.png) |
 
 | Repair | Settings |
 |---|---|
-| ![Repair](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-repair.png) | ![Settings](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-settings.png) |
+| ![Repair](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-repair.png) | ![Settings](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-settings.png) |
 
 ## Desktop app (nextar-gui)
 
