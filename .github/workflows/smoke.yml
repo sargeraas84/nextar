@@ -1,0 +1,50 @@
+name: smoke
+
+# Daily scheduled smoke run against the ACTUAL shipped nightly build, on a
+# dedicated runner. CI rebuilds from source; this instead downloads the
+# installer from the `nightly` release and drives the real Explorer shell
+# integration against it - registry verbs, Explorer verb resolution, actual
+# verb invocations (compress / extract / repair, encrypted-repair), and the
+# deep scenario runner - so regressions in the packaged artifacts are caught
+# even on days with no commits. Runs ~1h after the nightly build so the
+# release is fresh; also triggerable manually.
+
+on:
+  schedule:
+    - cron: '47 5 * * *' # daily at 05:47 UTC, after nightly (04:37) + CI
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-shell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The stable nightly release URL: fixed asset names, updated in place
+      # by the nightly workflow, so this always tests the newest build.
+      - name: Download the latest nightly installer
+        shell: pwsh
+        run: |
+          $url = "https://github.com/${{ github.repository }}/releases/download/nightly/nextar-setup.exe"
+          Invoke-WebRequest $url -OutFile "$env:RUNNER_TEMP\nextar-setup.exe"
+          Get-Item "$env:RUNNER_TEMP\nextar-setup.exe" | Select-Object Name, Length
+
+      # Registers the HKCU Explorer verbs + .next association + SendTo
+      # shortcut for the runner user, pointing at the temp prefix.
+      - name: Install to temp prefix (registers shell integration)
+        shell: pwsh
+        run: |
+          & "$env:RUNNER_TEMP\nextar-setup.exe" --quiet --prefix "$env:RUNNER_TEMP\nextar-smoke"
+
+      - name: Shell verification - registry + Explorer + invoked verbs
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Run -InstallDir "$env:RUNNER_TEMP\nextar-smoke"
+
+      - name: Deep smoke-test runner
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-shell-test.ps1 -Deep -InstallDir "$env:RUNNER_TEMP\nextar-smoke"

@@ -735,8 +735,27 @@
             </div>
           </div>
         </div>
+        <div class="shell reveal" style="--d:.19s;grid-column:1/-1">
+          <div class="core">
+            <div class="os-icon"><svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm2 4h10v2H7V7zm0 4h10v2H7v-2zm0 4h6v2H7v-2z"/></svg></div>
+            <h3>Stable · v0.1.0</h3>
+            <p class="ver">pinned release — both platforms</p>
+            <p>The first versioned build: both installers passed the full install → upgrade → uninstall E2E before shipping. Pick the pinned version when you want a fixed release, or the rolling nightly above for the newest master build.</p>
+            <span class="live-badge"><span class="dot"></span><span class="bt">v0.1.0 · stable</span></span>
+            <div style="margin-top:28px;display:flex;gap:10px;flex-wrap:wrap">
+              <a class="btn btn-primary" href="#" data-stable-download="nextar-setup.exe">
+                Windows installer
+                <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16"/></svg></span>
+              </a>
+              <a class="btn btn-ghost" href="#" data-stable-download="nextar-macos.dmg">
+                macOS dmg
+                <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16"/></svg></span>
+              </a>
+            </div>
+          </div>
+        </div>
       </div>
-      <p id="dl-note" class="reveal" style="margin-top:26px;font-size:12.5px;color:var(--ink-faint);text-align:center">These links always resolve to the latest nightly build from <span class="mono" style="color:var(--cyan)">master</span> — fixed asset names on the <span class="mono">nightly</span> release channel.</p>
+      <p id="dl-note" class="reveal" style="margin-top:26px;font-size:12.5px;color:var(--ink-faint);text-align:center">Nightly cards always resolve to the latest build from <span class="mono" style="color:var(--cyan)">master</span>; the stable card is pinned to the <span class="mono">v0.1.0</span> release.</p>
     </div>
   </section>
 </main>
@@ -828,6 +847,26 @@
       return;
     }
     a.href = relBase + f;
+  });
+
+  // Stable release channel: the pinned versioned release (v0.1.0). The dmg
+  // is named nextar-<version>-macos.dmg there (the nightly uses the fixed
+  // nextar-macos.dmg name), so map card keys to release asset names.
+  var STABLE_TAG = 'v0.1.0';
+  var STABLE_ASSETS = { 'nextar-setup.exe': 'nextar-setup.exe', 'nextar-macos.dmg': 'nextar-0.1.0-macos.dmg' };
+  var stableBase = local ? '../dist/' : 'https://github.com/' + REPO + '/releases/download/' + STABLE_TAG + '/';
+  document.querySelectorAll('[data-stable-download]').forEach(function(a){
+    var key = a.getAttribute('data-stable-download');
+    var f = STABLE_ASSETS[key];
+    if (!f) return;
+    if (local && !LOCAL_ASSETS[key]) {
+      a.removeAttribute('href');
+      a.setAttribute('aria-disabled', 'true');
+      a.classList.add('is-disabled');
+      a.title = f + ' is built by CI — not present in the local dist/ folder.';
+      return;
+    }
+    a.href = stableBase + f;
   });
 
   // Live badge: read the nightly release metadata at load time and show
