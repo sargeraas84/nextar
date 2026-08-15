@@ -134,7 +134,7 @@ function Run-Capture([string]$label, [string[]]$argv, [int]$maxNav) {
     $hwnd = Get-MainWindow $p
     if ($hwnd -ne [IntPtr]::Zero) { break }
   }
-  if ($hwnd -eq [IntPtr]::Zero) { Write-Error "pass $label: main window not found"; Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; exit 1 }
+  if ($hwnd -eq [IntPtr]::Zero) { Write-Error "pass ${label}: main window not found"; Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; exit 1 }
   # Topmost so the app's own content renders above anything on the runner.
   [W2]::SetWindowPos($hwnd, [IntPtr](-1), $originX, $originY, 0, 0, 0x0001) | Out-Null
   [W2]::SetForegroundWindow($hwnd) | Out-Null
