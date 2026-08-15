@@ -22,8 +22,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  issues: write # post results as a comment on the nightly release
+  # contents: write so the report job can append the daily smoke results to
+  # the nightly release body (the release-comments REST API was removed by
+  # GitHub, so the body is the channel visible on the release page).
+  contents: write
 
 jobs:
   # macOS first: cheap (~2 min) and gates the Windows job below.
@@ -151,15 +153,22 @@ jobs:
           "summary=$summary" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           exit $code
 
-  # Always runs (even when a job failed/skipped) and posts the per-job results
-  # to the nightly release, so a failed daily smoke is visible on the release
-  # page instead of only in the Actions tab.
+  # Always runs (even when a job failed/skipped) and records the per-job
+  # results on the nightly release, so a failed daily smoke is visible on the
+  # release page instead of only in the Actions tab.
+  #
+  # Channel: the release BODY, not a release comment. GitHub removed the
+  # release-comments REST API (all /releases/{id}/comments endpoints return
+  # 404), so the body is the only release-page surface we can write. We
+  # replace any previous "Daily smoke" section (the nightly workflow rewrites
+  # the body each build, and the site's badge parser reads the commit + sha
+  # lines above, so an appended section is safe).
   report:
     runs-on: ubuntu-latest
     needs: [macos-dmg, nightly-shell]
     if: always()
     steps:
-      - name: Post smoke results to the nightly release
+      - name: Write smoke results into the nightly release body
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -172,8 +181,12 @@ jobs:
           MAC_SUMMARY="${{ needs.macos-dmg.outputs.summary }}"
           DEEP_SUMMARY="${{ needs.nightly-shell.outputs.deep }}"
           icon() { case "$1" in success) echo '✅';; failure) echo '❌';; *) echo '⚠️ skipped';; esac; }
-          BODY="## Daily smoke results\n\n- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- asset commit: \`${COMMIT}\`\n- macOS dmg E2E: $(icon "$MAC") \`$MAC_SUMMARY\`\n- Windows shell E2E: $(icon "$WIN") \`$DEEP_SUMMARY\`\n"
-          echo "--- posting ---"
-          printf '%b' "$BODY"
-          gh api --method POST "repos/${{ github.repository }}/releases/$RELEASE_ID/comments" -f body="$(printf '%b' "$BODY")" >/dev/null
-          echo "comment posted to release $RELEASE_ID"
+          SMOKE="## Daily smoke results\n\n- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- asset commit: \`${COMMIT}\`\n- macOS dmg E2E: $(icon "$MAC") \`$MAC_SUMMARY\`\n- Windows shell E2E: $(icon "$WIN") \`$DEEP_SUMMARY\`\n"
+          # Keep the nightly's original body, dropping any earlier smoke section.
+          ORIG=$(gh api "repos/${{ github.repository }}/releases/$RELEASE_ID" --jq '.body')
+          BASE=$(printf '%s' "$ORIG" | sed '/^## Daily smoke results/,$d' | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
+          printf '%s\n\n%s' "$BASE" "$(printf '%b' "$SMOKE")" > /tmp/nightly-body.md
+          echo "--- new body ---"
+          cat /tmp/nightly-body.md
+          gh api --method PATCH "repos/${{ github.repository }}/releases/$RELEASE_ID" -f body="$(cat /tmp/nightly-body.md)" --jq '.body' >/dev/null
+          echo "body updated on release $RELEASE_ID"
