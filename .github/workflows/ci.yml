@@ -143,15 +143,19 @@ jobs:
       # Same settings-schema gate as the Windows job: the committed corrupt
       # fixture must exit non-zero, a valid fixture must exit 0, and the live
       # path must be clean - so a regressed --check-settings is caught on the
-      # Mac too.
+      # Mac too. Uses `if` (not `test $?`) because GitHub's default bash -e
+      # would otherwise abort on the expected non-zero exit.
       - name: check-settings gate (corrupt fixture flagged)
         run: |
-          target/release/nextar-gui --check-settings tests/fixtures/settings/corrupt.json > /dev/null 2>&1
-          test $? -eq 1 || { echo "corrupt fixture not flagged"; exit 1; }
-          target/release/nextar-gui --check-settings tests/fixtures/settings/v3-current.json > /dev/null 2>&1
-          test $? -eq 0 || { echo "valid fixture rejected"; exit 1; }
-          target/release/nextar-gui --check-settings > /dev/null 2>&1
-          test $? -eq 0 || { echo "live-path check failed"; exit 1; }
+          if target/release/nextar-gui --check-settings tests/fixtures/settings/corrupt.json > /dev/null 2>&1; then
+            echo "corrupt fixture not flagged"; exit 1
+          fi
+          if ! target/release/nextar-gui --check-settings tests/fixtures/settings/v3-current.json > /dev/null 2>&1; then
+            echo "valid fixture rejected"; exit 1
+          fi
+          if ! target/release/nextar-gui --check-settings > /dev/null 2>&1; then
+            echo "live-path check failed"; exit 1
+          fi
           echo "check-settings gate OK"
 
       - name: Run tests (macOS)
