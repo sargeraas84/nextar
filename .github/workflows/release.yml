@@ -141,6 +141,9 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
           name: nextar ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
           generate_release_notes: true
+          # Never silently ship an empty release: fail loudly if any expected
+          # artifact is missing from the download step.
+          fail_on_unmatched_files: true
           files: |
             assets/nextar-setup.exe
             assets/nextar.exe

@@ -66,13 +66,24 @@ jobs:
           '{0}  nextar-setup.exe' -f $h.Hash.ToLower() | Set-Content nextar-setup.exe.sha256
           Get-Content nextar-setup.exe.sha256
 
+      # Stage into a FLAT directory before upload. upload-artifact@v4 keeps the
+      # common root across all paths; mixing dist/ files with workspace-root
+      # files used to preserve the 'dist/' prefix, so the publish job's globs
+      # (assets/nextar-setup.exe) matched nothing and the release silently
+      # ended up with zero assets after overwrite_files ran.
+      - name: Stage installer payload (flat)
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp dist/nextar-setup.exe staging/
+          cp summary-windows.txt staging/
+          cp nextar-setup.exe.sha256 staging/
+          ls -la staging/
+
       - uses: actions/upload-artifact@v4
         with:
           name: nightly-windows
-          path: |
-            dist/nextar-setup.exe
-            summary-windows.txt
-            nextar-setup.exe.sha256
+          path: staging/*
 
   macos:
     runs-on: macos-latest
@@ -104,13 +115,21 @@ jobs:
           shasum -a 256 dist/nextar-macos.dmg | awk '{print $1"  nextar-macos.dmg"}' > nextar-macos.dmg.sha256
           cat nextar-macos.dmg.sha256
 
+      # Same flat staging as the windows job (see comment there): the artifact
+      # must contain nextar-macos.dmg at its root or the publish glob fails.
+      - name: Stage dmg payload (flat)
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp dist/nextar-macos.dmg staging/
+          cp summary-macos.txt staging/
+          cp nextar-macos.dmg.sha256 staging/
+          ls -la staging/
+
       - uses: actions/upload-artifact@v4
         with:
           name: nightly-macos
-          path: |
-            dist/nextar-macos.dmg
-            summary-macos.txt
-            nextar-macos.dmg.sha256
+          path: staging/*
 
   # Creates (or updates in place) the nightly release with both artifacts
   # and a rich body: commit subject, test results, SHA-256 checksums.
@@ -164,6 +183,10 @@ jobs:
           name: nextar nightly
           prerelease: true
           overwrite_files: true
+          # Never silently publish an empty release: if the staged files are
+          # missing (e.g. an upload-path regression), fail loudly instead of
+          # wiping the previous nightly's assets.
+          fail_on_unmatched_files: true
           body_path: ${{ github.workspace }}/body.md
           files: |
             assets/nextar-setup.exe
