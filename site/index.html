@@ -307,6 +307,19 @@
     box-shadow:0 0 8px var(--cyan);animation:pulse 2.4s var(--ease-soft) infinite}
   .live-badge.off{color:var(--ink-faint);background:rgba(255,255,255,.03);border-color:var(--hairline)}
   .live-badge.off .dot{background:var(--ink-faint);box-shadow:none;animation:none}
+  .smoke-card{display:flex;align-items:center;gap:10px;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.05em;
+    color:var(--ink);background:rgba(255,255,255,.03);border:1px solid var(--hairline);
+    padding:10px 16px;border-radius:14px;transition:border-color .4s var(--ease-soft),background .4s var(--ease-soft)}
+  .smoke-card .smoke-dot{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);flex:none}
+  .smoke-card.ok{border-color:rgba(69,224,168,.25);background:rgba(69,224,168,.05)}
+  .smoke-card.ok .smoke-dot{background:var(--success);box-shadow:0 0 8px var(--success)}
+  .smoke-card.bad{border-color:rgba(255,102,122,.28);background:rgba(255,102,122,.06)}
+  .smoke-card.bad .smoke-dot{background:var(--error);box-shadow:0 0 8px var(--error)}
+  .smoke-card .smoke-t{text-transform:uppercase;letter-spacing:.18em;font-size:10px;color:var(--ink-faint);flex:none}
+  .smoke-card .smoke-bt{color:var(--ink);flex:1;text-align:left;min-width:0}
+  html[data-theme="light"] .smoke-card{background:rgba(16,24,40,.03)}
+  html[data-theme="light"] .smoke-card.ok{background:rgba(69,224,168,.08)}
+  html[data-theme="light"] .smoke-card.bad{background:rgba(255,102,122,.08)}
   .verify{margin-top:18px;padding-top:14px;border-top:1px solid var(--hairline);display:flex;flex-direction:column;gap:8px}
   .verify-head{display:flex;align-items:center;justify-content:space-between}
   .verify-lbl{font-family:"JetBrains Mono",monospace;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
@@ -756,6 +769,17 @@
         </div>
       </div>
       <p id="dl-note" class="reveal" style="margin-top:26px;font-size:12.5px;color:var(--ink-faint);text-align:center">Nightly cards always resolve to the latest build from <span class="mono" style="color:var(--cyan)">master</span>; the stable card is pinned to the <span class="mono">v0.1.0</span> release.</p>
+
+      <!-- Daily smoke status: reads the latest entry from the "Daily smoke
+           log" issue posted by the smoke workflow, so a failed scheduled
+           run is visible right on the download page. -->
+      <div id="smoke-strip" class="reveal" style="--d:.24s;margin-top:34px;max-width:720px;margin-left:auto;margin-right:auto">
+        <div class="smoke-card" id="smoke-card">
+          <span class="smoke-dot"></span>
+          <span class="smoke-t">daily smoke</span>
+          <span class="smoke-bt">checking…</span>
+        </div>
+      </div>
     </div>
   </section>
 </main>
@@ -955,6 +979,57 @@
         if(code) code.textContent = 'unavailable — no nightly build yet';
       });
     });
+  }
+
+  // Daily smoke status: find the "Daily smoke log" issue (posted by the
+  // smoke workflow), read its LATEST comment, and render a status pill on
+  // the download page. Green when the last run passed on both platforms;
+  // red when any leg failed/skipped. Fails gracefully when unavailable.
+  function paintSmoke(card, ok, text, tip){
+    if(!card) return;
+    card.classList.toggle('ok', ok === true);
+    card.classList.toggle('bad', ok === false);
+    var bt = card.querySelector('.smoke-bt');
+    if(bt) bt.textContent = text;
+    if(tip) card.title = tip;
+  }
+  var smokeCard = document.getElementById('smoke-card');
+  if (smokeCard) {
+    if (local) {
+      paintSmoke(smokeCard, null, 'daily smoke · local mode — not shown');
+    } else {
+      fetch('https://api.github.com/repos/' + REPO + '/issues?state=open&per_page=100')
+      .then(function(r){ if(!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(issues){
+        var log = issues.filter(function(i){ return i.title === 'Daily smoke log'; })[0];
+        if(!log) throw new Error('no daily smoke log issue');
+        return fetch('https://api.github.com/repos/' + REPO + '/issues/' + log.number + '/comments?per_page=1');
+      })
+      .then(function(r){ if(!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(comments){
+        var c = comments[0];
+        if(!c) throw new Error('no smoke entries yet');
+        var body = c.body || '';
+        var day = (body.match(/Daily smoke results \(([0-9-]+)\)/) || [])[1] || '';
+        var mac = /macOS dmg E2E: ([✅❌⚠️])/.exec(body);
+        var win = /Windows shell E2E: ([✅❌⚠️])/.exec(body);
+        var macCount = (body.match(/macOS dmg E2E: [✅❌⚠️] `(\d+ passed, \d+ failed)`/) || [])[1];
+        var winCount = (body.match(/Windows shell E2E: [✅❌⚠️] `(\d+ passed, \d+ failed)`/) || [])[1];
+        var macOk = mac ? mac[1] === '✅' : false;
+        var winOk = win ? win[1] === '✅' : false;
+        var allOk = macOk && winOk;
+        var parts = ['daily smoke'];
+        if(day) parts.push(day);
+        if(macCount) parts.push('macOS ' + macCount);
+        if(winCount) parts.push('Windows ' + winCount);
+        paintSmoke(smokeCard, allOk, parts.join(' · '),
+          (allOk ? 'Last scheduled smoke passed on both platforms.'
+                 : 'Last scheduled smoke had a failing leg — see the Daily smoke log issue.') + '\n' + c.html_url);
+      })
+      .catch(function(){
+        paintSmoke(smokeCard, null, 'daily smoke · unavailable');
+      });
+    }
   }
 
   // Copy-to-clipboard with a legacy fallback + "copied" feedback.

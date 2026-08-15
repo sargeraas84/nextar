@@ -295,6 +295,40 @@ See **`docs/FORMAT.md`** for the complete binary layout of the `.NEXT`
 archive and `.nvol` volume, and **`docs/ARCHITECTURE.md`** for the module
 breakdown, pipeline design and threat model.
 
+## Scheduled builds & release health
+
+Three workflows keep the shipped artifacts fresh and honest:
+
+- **`nightly` (04:37 UTC daily)** — builds both installers from `master` and
+  publishes them in place to the rolling `nightly` release (fixed download
+  URLs, e.g. `…/releases/download/nightly/nextar-setup.exe`). After
+  publishing it **verifies the release actually serves the assets**: both
+  URLs must answer 200, the release must carry exactly the two expected
+  files, and the served bytes + release-body checksums must match the staged
+  hashes — so the landing page badges can never drift from what's served.
+- **`smoke` (05:47 UTC daily)** — downloads the shipped installers and
+  drives the real packaging: a macOS job mounts the dmg, installs, launches
+  the GUI, upgrades and uninstalls (gating the rest); a Windows job
+  exercises the real Explorer shell integration and the deep scenario
+  runner (compress / extract / repair / encrypted-repair). Both legs assert
+  the assets are fresh and were published in the same build. Results are
+  recorded to the **“Daily smoke log” issue** and a dated section on the
+  nightly release body; the landing page shows a status pill reading the
+  latest entry.
+- **`ci` (per-push)** — full test + shell + installer E2E suite, gated by
+  branch protection on `master`.
+
+To verify the schedule-fired (no-push) runs after the fact — e.g. first
+thing in the morning — run:
+
+```bash
+bash scripts/check-scheduled-runs.sh [owner/repo]
+```
+
+It asserts both workflows fired via the `schedule` event (not a push)
+**today**, completed green, and that the release body carries that day's
+smoke results. See **`scripts/check-scheduled-runs.sh`** for details.
+
 ## Status
 
 Working v0.1: create / extract / list / info / verify / repair, zstd + lzma2

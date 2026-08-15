@@ -34,25 +34,31 @@ echo "== nextar schedule verification for $(date -u +%F) (UTC) =="
 NIGHTLY_RUN=$(gh run list --repo "$REPO" --workflow nightly.yml --event schedule --limit 1 --json databaseId,conclusion,createdAt --jq '.[0]' 2>/dev/null || echo '')
 SMOKE_RUN=$(gh run list --repo "$REPO" --workflow smoke.yml --event schedule --limit 1 --json databaseId,conclusion,createdAt --jq '.[0]' 2>/dev/null || echo '')
 
+# The run JSON is a single line with fields databaseId, conclusion and
+# createdAt (ISO 8601). Extract with awk/grep to avoid a python dependency;
+# the date comparison slices the ISO timestamp (first 10 chars = YYYY-MM-DD)
+# so it works on GNU and BSD date alike.
 if [ -n "$NIGHTLY_RUN" ]; then
-  NID=$(printf '%s' "$NIGHTLY_RUN" | python -c "import json,sys; d=json.load(sys.stdin); print(d['databaseId'])")
-  NC=$(printf '%s' "$NIGHTLY_RUN" | python -c "import json,sys; print(json.load(sys.stdin)['conclusion'])")
-  NT=$(printf '%s' "$NIGHTLY_RUN" | python -c "import json,sys; print(json.load(sys.stdin)['createdAt'])")
+  NID=$(printf '%s' "$NIGHTLY_RUN" | sed -E 's/.*"databaseId":([0-9]+).*/\1/')
+  NC=$(printf '%s' "$NIGHTLY_RUN" | sed -E 's/.*"conclusion":"([^"]*)".*/\1/')
+  NT=$(printf '%s' "$NIGHTLY_RUN" | sed -E 's/.*"createdAt":"([^"]*)".*/\1/')
+  NDAY=${NT:0:10}
   echo "nightly (schedule): run $NID at $NT -> $NC"
   check "nightly schedule run completed" test "$NC" = success
-  check "nightly schedule run is today" bash -c "test \"\$(date -u -d '$NT' +%F)\" = \"\$(date -u +%F)\""
+  check "nightly schedule run is today" test "$NDAY" = "$(date -u +%F)"
 else
   echo "  [FAIL] no schedule-event nightly run found"
   fail=1
 fi
 
 if [ -n "$SMOKE_RUN" ]; then
-  SID=$(printf '%s' "$SMOKE_RUN" | python -c "import json,sys; d=json.load(sys.stdin); print(d['databaseId'])")
-  SC=$(printf '%s' "$SMOKE_RUN" | python -c "import json,sys; print(json.load(sys.stdin)['conclusion'])")
-  ST=$(printf '%s' "$SMOKE_RUN" | python -c "import json,sys; print(json.load(sys.stdin)['createdAt'])")
+  SID=$(printf '%s' "$SMOKE_RUN" | sed -E 's/.*"databaseId":([0-9]+).*/\1/')
+  SC=$(printf '%s' "$SMOKE_RUN" | sed -E 's/.*"conclusion":"([^"]*)".*/\1/')
+  ST=$(printf '%s' "$SMOKE_RUN" | sed -E 's/.*"createdAt":"([^"]*)".*/\1/')
+  SDAY=${ST:0:10}
   echo "smoke (schedule): run $SID at $ST -> $SC"
   check "smoke schedule run completed" test "$SC" = success
-  check "smoke schedule run is today" bash -c "test \"\$(date -u -d '$ST' +%F)\" = \"\$(date -u +%F)\""
+  check "smoke schedule run is today" test "$SDAY" = "$(date -u +%F)"
 else
   echo "  [FAIL] no schedule-event smoke run found"
   fail=1
