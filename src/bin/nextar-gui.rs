@@ -276,6 +276,9 @@ struct Settings {
     /// Default recovery parity blocks (0 = off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     recovery: Option<u16>,
+    /// Retention cap for `recovery.log` (number of reset events kept).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recovery_log_limit: Option<usize>,
     /// Recently opened / created archives (most recent first, newest six).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     recent: Option<Vec<String>>,
@@ -290,6 +293,7 @@ impl Default for Settings {
             block: None,
             threads: None,
             recovery: None,
+            recovery_log_limit: None,
             recent: None,
         }
     }
@@ -305,6 +309,7 @@ static SETTINGS: Mutex<Settings> = Mutex::new(Settings {
     block: None,
     threads: None,
     recovery: None,
+    recovery_log_limit: None,
     recent: None,
 });
 
@@ -419,20 +424,38 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 /// entries are rotated out, so the audit file never grows without bound.
 const RECOVERY_LOG_MAX_ENTRIES: usize = 50;
 
-/// Rewrite `recovery.log` so it keeps only the most recent
-/// [`RECOVERY_LOG_MAX_ENTRIES`] lines. Best-effort: a rotation failure never
-/// breaks a reset (the freshly appended line is already on disk).
-fn rotate_recovery_log(log: &Path) {
+/// Clamp a recovery.log retention limit to a sane [1, 1000] window.
+fn clamp_log_limit(n: usize) -> usize {
+    n.clamp(1, 1000)
+}
+
+/// The effective retention limit: the configured `recovery_log_limit`, or
+/// [`RECOVERY_LOG_MAX_ENTRIES`] when unset, clamped to [1, 1000] so the log
+/// can't be pinned to zero or an absurd size.
+fn recovery_log_limit() -> usize {
+    SETTINGS
+        .lock()
+        .ok()
+        .and_then(|g| g.recovery_log_limit)
+        .map(clamp_log_limit)
+        .unwrap_or(RECOVERY_LOG_MAX_ENTRIES)
+}
+
+/// Rewrite `recovery.log` so it keeps only the most recent `limit` lines.
+/// Best-effort: a rotation failure never breaks a reset (the freshly
+/// appended line is already on disk).
+fn rotate_recovery_log(log: &Path, limit: usize) {
+    let limit = limit.max(1);
     let Ok(raw) = std::fs::read_to_string(log) else {
         return;
     };
     let lines: Vec<&str> = raw.lines().collect();
-    if lines.len() <= RECOVERY_LOG_MAX_ENTRIES {
+    if lines.len() <= limit {
         return;
     }
     let mut out = lines
         .iter()
-        .skip(lines.len() - RECOVERY_LOG_MAX_ENTRIES)
+        .skip(lines.len() - limit)
         .copied()
         .collect::<Vec<_>>()
         .join("\n");
@@ -464,7 +487,7 @@ fn log_recovery_to(dir: &Path, backup: &Path) -> Option<PathBuf> {
     if !ok {
         return None;
     }
-    rotate_recovery_log(&log);
+    rotate_recovery_log(&log, recovery_log_limit());
     Some(log)
 }
 
@@ -513,6 +536,14 @@ fn read_recovery_entries() -> Vec<RecoveryEntry> {
         .parent()
         .map(read_recovery_entries_at)
         .unwrap_or_default()
+}
+
+/// Truncate `recovery.log` beside settings.json (the Settings view's "Clear
+/// history" action). Best-effort: a failure just leaves the log untouched.
+fn clear_recovery_log() {
+    if let Some(dir) = settings_path().parent() {
+        let _ = std::fs::remove_file(dir.join("recovery.log"));
+    }
 }
 
 /// Back up the settings file and delete the original. Returns the backup
@@ -601,6 +632,15 @@ fn set_create_defaults(codec: String, level: i32, block: String, threads: usize,
         g.threads = Some(threads);
         g.recovery = Some(recovery);
     }
+    save_settings();
+}
+
+/// Apply the recovery.log retention cap and persist it.
+fn set_recovery_log_limit(n: usize) {
+    SETTINGS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .recovery_log_limit = Some(clamp_log_limit(n));
     save_settings();
 }
 
@@ -1623,6 +1663,7 @@ struct GuiApp {
     settings_block_error: bool,
     settings_threads: usize,
     settings_recovery: u16,
+    settings_log_limit: usize,
     // job plumbing
     job: Option<Job>,
     last_result: Option<std::result::Result<String, String>>,
@@ -1673,6 +1714,7 @@ impl Default for GuiApp {
             settings_block_error: false,
             settings_threads: settings_create_threads(),
             settings_recovery: settings_create_recovery(),
+            settings_log_limit: recovery_log_limit(),
             job: None,
             last_result: None,
             settings_reset_notice: None,
@@ -3394,11 +3436,42 @@ impl GuiApp {
             });
         // Recovery history: audited backups from previous resets, so a user
         // can locate and restore an earlier settings file.
-        let entries = read_recovery_entries();
-        if !entries.is_empty() {
-            ui.add_space(12.0);
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
             ui.label(RichText::new("Recovery history").size(12.0).color(text3()));
-            ui.add_space(6.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button("Clear history")
+                    .on_hover_text("Truncate recovery.log (removes all recorded resets)")
+                    .clicked()
+                {
+                    clear_recovery_log();
+                }
+            });
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Keep last").size(12.0).color(text2()));
+            let resp = ui.add(
+                egui::DragValue::new(&mut self.settings_log_limit).range(1..=1000),
+            );
+            ui.label(RichText::new("entries in recovery.log").size(12.0).color(text2()));
+            if resp.changed() {
+                set_recovery_log_limit(self.settings_log_limit);
+                if let Some(dir) = settings_path().parent() {
+                    rotate_recovery_log(&dir.join("recovery.log"), self.settings_log_limit);
+                }
+            }
+        });
+        ui.add_space(8.0);
+        let entries = read_recovery_entries();
+        if entries.is_empty() {
+            ui.label(
+                RichText::new("No resets recorded yet — a corrupted-settings reset adds an entry here.")
+                    .size(11.5)
+                    .color(text3()),
+            );
+        } else {
             egui::Frame::new()
                 .fill(bg2())
                 .stroke(Stroke::new(1.0, border()))
@@ -4760,6 +4833,7 @@ mod tests {
             block: Some("4M".to_string()),
             threads: Some(4),
             recovery: Some(8),
+            recovery_log_limit: Some(25),
             recent: Some(vec!["C:\\a\\b.next".to_string()]),
         };
         save_settings_at(&path, &full).unwrap();
@@ -4849,6 +4923,7 @@ mod tests {
                     block: None,
                     threads: None,
                     recovery: None,
+                    recovery_log_limit: None,
                     recent: None,
                 },
             ),
@@ -4861,6 +4936,7 @@ mod tests {
                     block: Some("4M".to_string()),
                     threads: Some(8),
                     recovery: Some(16),
+                    recovery_log_limit: None,
                     recent: None,
                 },
             ),
@@ -4873,6 +4949,7 @@ mod tests {
                     block: Some("1M".to_string()),
                     threads: Some(8),
                     recovery: Some(4),
+                    recovery_log_limit: None,
                     recent: Some(vec!["C:\\Users\\alice\\Documents\\backup.next".to_string()]),
                 },
             ),
@@ -4952,7 +5029,7 @@ mod tests {
                 .write_all(format!("[entry {i}] settings reset -> backed up to b{i}\n").as_bytes())
                 .unwrap();
         }
-        rotate_recovery_log(&log);
+        rotate_recovery_log(&log, RECOVERY_LOG_MAX_ENTRIES);
         let kept = std::fs::read_to_string(&log).unwrap();
         let lines: Vec<&str> = kept.lines().collect();
         assert_eq!(lines.len(), RECOVERY_LOG_MAX_ENTRIES, "kept exactly N entries");
@@ -4962,7 +5039,7 @@ mod tests {
         // Under the limit: a short log is left untouched.
         let small = dir.path().join("small.log");
         std::fs::write(&small, "one line\n").unwrap();
-        rotate_recovery_log(&small);
+        rotate_recovery_log(&small, 5);
         assert_eq!(std::fs::read_to_string(&small).unwrap(), "one line\n");
     }
 
@@ -4990,6 +5067,15 @@ mod tests {
         let entries = read_recovery_entries_at(dir.path());
         assert_eq!(entries.len(), 1, "garbage line skipped");
         assert_eq!(entries[0].backup, "ok");
+    }
+
+    #[test]
+    fn recovery_log_limit_clamps_to_sane_range() {
+        assert_eq!(clamp_log_limit(0), 1);
+        assert_eq!(clamp_log_limit(1), 1);
+        assert_eq!(clamp_log_limit(25), 25);
+        assert_eq!(clamp_log_limit(50), 50);
+        assert_eq!(clamp_log_limit(1_000_000), 1000);
     }
 
     #[test]
