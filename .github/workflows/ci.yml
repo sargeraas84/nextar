@@ -96,6 +96,14 @@ jobs:
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -OnlyInstaller -SetupExe "setup\target\release\nextar-setup.exe"
 
+      # Full lifecycle on this ephemeral runner: install WITH shell
+      # integration, upgrade in place (asserting settings.json survives),
+      # then uninstall. Runs last because it clobbers the global shell verbs.
+      - name: Installer E2E - full install, upgrade (settings preserved), uninstall
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -Full -OnlyInstaller -SetupExe "setup\target\release\nextar-setup.exe"
+
   # macOS: cross-platform packaging. The engine + GUI are fully portable
   # (Windows-only bits - registry theme detection, DWM title bar/corners,
   # shell integration - are #[cfg(windows)] and compile away); the .dmg

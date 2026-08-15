@@ -75,6 +75,13 @@ jobs:
         shell: bash
         run: bash scripts/package.sh
 
+      # Release gate: the full installer lifecycle must pass before the
+      # artifacts are attached to the release.
+      - name: Installer E2E - full install, upgrade, uninstall
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -Full -OnlyInstaller -SetupExe "dist\nextar-setup.exe"
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release
@@ -98,6 +105,13 @@ jobs:
 
       - name: Build the .dmg
         run: bash installers/macos/build-dmg.sh
+
+      # Release gate: the macOS install lifecycle (including a brief GUI
+      # launch) must pass before the .dmg is attached to the release.
+      - name: Installer E2E - mount, install, upgrade, uninstall
+        run: |
+          DMG=$(ls dist/*.dmg)
+          bash installers/macos/verify-install.sh "$DMG"
 
       - uses: actions/upload-artifact@v4
         with:

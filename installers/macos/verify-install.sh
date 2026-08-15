@@ -53,6 +53,19 @@ check "app bundle has Info.plist" test -f "$APP/Contents/Info.plist"
 check "app bundle has the icon" test -f "$APP/Contents/Resources/nextar.icns"
 check "installed CLI runs" "$APPS/nextar" --version
 
+# launch the GUI briefly to prove nextar-gui actually starts on macOS
+"$APP/Contents/MacOS/nextar-gui" >/dev/null 2>&1 &
+GUI_PID=$!
+sleep 6
+if kill -0 "$GUI_PID" 2>/dev/null; then
+  gui_alive=1
+  kill "$GUI_PID" 2>/dev/null || true
+  wait "$GUI_PID" 2>/dev/null || true
+else
+  gui_alive=0
+fi
+check "GUI launches and stays alive" test "$gui_alive" -eq 1
+
 # 2) upgrade in place: copy over the existing bundle + CLI
 cp -R "$MNT/nextar.app" "$APPS/"
 cp "$MNT/nextar" "$APPS/nextar"
