@@ -30,10 +30,14 @@ jobs:
 
       # Tests must pass; the summary is captured for the release body. The
       # log is dumped on failure so a broken test/compile is diagnosable
-      # instead of being swallowed by bash -e.
+      # instead of being swallowed by bash -e. The setup crate embeds
+      # target/release/nextar.exe + nextar-gui.exe via include_bytes!, so the
+      # payload must be built before tests run (cargo caches it for the
+      # later package.sh step).
       - name: Run tests and collect summary
         shell: bash
         run: |
+          cargo build --release --bin nextar --bin nextar-gui
           set +e
           cargo test > "$RUNNER_TEMP/tests.log" 2>&1
           RC1=$?
