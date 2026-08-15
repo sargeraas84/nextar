@@ -40,6 +40,34 @@ function Check([string]$name, [bool]$ok, [string]$detail = '') {
     }
 }
 
+# Run `nextar-gui --check-settings <path>` and report whether it exited 0.
+# The corrupt path writes to stderr, which would trip ErrorActionPreference
+# Stop as a NativeCommandError, so drop to Continue around the call (same
+# pattern the functional CLI checks use).
+function Test-SettingsClean([string]$GuiExe, [string]$Path) {
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $GuiExe --check-settings $Path 2>&1 | Out-Null
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $old
+    return ($code -eq 0)
+}
+
+# Exercise `nextar-gui --check-settings`: the committed corrupt fixture must be
+# flagged (non-zero exit) and a valid fixture accepted, proving the flag
+# distinguishes clean from corrupt before the E2E relies on it.
+function Check-SettingsFlags([string]$GuiExe) {
+    $repo = Split-Path $PSScriptRoot -Parent
+    $corrupt = Join-Path $repo 'tests\fixtures\settings\corrupt.json'
+    if (Test-Path -LiteralPath $corrupt) {
+        Check "check-settings flags the committed corrupt fixture" (-not (Test-SettingsClean $GuiExe $corrupt))
+    }
+    $valid = Join-Path $repo 'tests\fixtures\settings\v3-current.json'
+    if (Test-Path -LiteralPath $valid) {
+        Check "check-settings accepts a valid fixture" (Test-SettingsClean $GuiExe $valid)
+    }
+}
+
 Write-Host "nextar shell integration - verifying install at $InstallDir"
 $gui = Join-Path $InstallDir 'nextar-gui.exe'
 $cli = Join-Path $InstallDir 'nextar.exe'
@@ -299,6 +327,7 @@ if ($Installer) {
                 & $setup --prefix $e2e --quiet 2>&1 | Out-Null
                 Check "install exited 0" ($LASTEXITCODE -eq 0)
                 Check "install wrote the three payload exes" ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $guiexe) -and (Test-Path -LiteralPath $setupexe))
+                Check-SettingsFlags $guiexe
                 $loc = if (Test-Path -LiteralPath $unkey) { (Get-ItemProperty -LiteralPath $unkey).InstallLocation } else { $null }
                 Check "install registered the uninstall entry" ($loc -eq $e2e)
                 Check "install created the Start Menu shortcut" (Test-Path -LiteralPath $sm)
@@ -307,11 +336,13 @@ if ($Installer) {
                 $settings = Join-Path $e2e 'settings.json'
                 $sentinel = '{"theme":"dark","codec":"lzma2","threads":8}'
                 [IO.File]::WriteAllText($settings, $sentinel)
+                Check "settings clean before upgrade" (Test-SettingsClean $guiexe $settings)
 
                 & $setup --prefix $e2e --quiet 2>&1 | Out-Null
                 Check "upgrade exited 0" ($LASTEXITCODE -eq 0)
                 Check "upgrade kept the payload" ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $guiexe))
                 Check "upgrade preserved settings.json" ((Test-Path -LiteralPath $settings) -and ([IO.File]::ReadAllText($settings) -eq $sentinel))
+                Check "settings clean after upgrade" (Test-SettingsClean $guiexe $settings)
                 $lnkCount = @(Get-ChildItem -LiteralPath (Split-Path $sm -Parent) -Filter 'nextar.lnk' -ErrorAction SilentlyContinue).Count
                 Check "upgrade produced no duplicate Start Menu shortcut" ($lnkCount -le 1)
                 $loc = if (Test-Path -LiteralPath $unkey) { (Get-ItemProperty -LiteralPath $unkey).InstallLocation } else { $null }
@@ -329,6 +360,7 @@ if ($Installer) {
                 & $setup --prefix $e2e --quiet --no-shell 2>&1 | Out-Null
                 Check "install exited 0" ($LASTEXITCODE -eq 0)
                 Check "install wrote the three payload exes" ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $guiexe) -and (Test-Path -LiteralPath $setupexe))
+                Check-SettingsFlags $guiexe
                 $loc = if (Test-Path -LiteralPath $unkey) { (Get-ItemProperty -LiteralPath $unkey).InstallLocation } else { $null }
                 Check "install left the uninstall entry untouched" ($loc -eq $locBefore)
                 Check "install left the Start Menu shortcut untouched" ((Test-Path -LiteralPath $sm) -eq $smBefore)

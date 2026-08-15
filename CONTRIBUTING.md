@@ -45,7 +45,11 @@ remove a field:
 A corrupt settings file is detected at startup and the Settings view offers a
 one-click reset (the unreadable file is backed up first as
 `settings.json.corrupt-<timestamp>`). `nextar-gui --reset-settings` does the
-same recovery headlessly.
+same recovery headlessly. Every reset appends an audit line to
+`%LOCALAPPDATA%\nextar\recovery.log` so backups stay traceable across
+launches; `nextar-gui --check-settings [path]` validates a settings file for
+scripts/CI (exit 0 clean/absent, exit 1 corrupt) and checks the live location
+when no path is given.
 
 ## Releasing
 

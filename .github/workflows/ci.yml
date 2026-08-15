@@ -56,6 +56,22 @@ jobs:
       - name: Build release binaries (engine + GUI)
         run: cargo build --release --bin nextar --bin nextar-gui
 
+      # Run --check-settings against a committed corrupt fixture (must exit
+      # non-zero) and a valid fixture (must exit 0), plus the live path, so
+      # a broken settings file or a regressed flag is caught early.
+      - name: check-settings gate (corrupt fixture flagged)
+        shell: pwsh
+        run: |
+          $corrupt = "tests/fixtures/settings/corrupt.json"
+          $valid   = "tests/fixtures/settings/v3-current.json"
+          & "target/release/nextar-gui.exe" --check-settings $corrupt 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 1) { throw "corrupt fixture not flagged (exit $LASTEXITCODE)" }
+          & "target/release/nextar-gui.exe" --check-settings $valid 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "valid fixture rejected (exit $LASTEXITCODE)" }
+          & "target/release/nextar-gui.exe" --check-settings 2>&1 | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "live-path check failed (exit $LASTEXITCODE)" }
+          Write-Host "check-settings gate OK"
+
       - name: Build installer wizard
         run: cargo build --release --manifest-path setup/Cargo.toml
 
