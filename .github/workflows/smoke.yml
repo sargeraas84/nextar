@@ -12,7 +12,9 @@ name: smoke
 #     repair), and the deep scenario runner.
 # The macOS job runs FIRST and gates the Windows job, so a broken dmg aborts
 # the run before the (expensive) Windows smoke starts. Runs ~1h after the
-# nightly build so the release is fresh; also triggerable manually.
+# nightly build so the release is fresh; also triggerable manually. On
+# completion (even on failure) a report job posts the per-job results to the
+# nightly release so a failed daily smoke is visible on the release page.
 
 on:
   schedule:
@@ -21,30 +23,46 @@ on:
 
 permissions:
   contents: read
+  issues: write # post results as a comment on the nightly release
 
 jobs:
   # macOS first: cheap (~2 min) and gates the Windows job below.
   macos-dmg:
     runs-on: macos-latest
+    outputs:
+      summary: ${{ steps.e2e.outputs.summary }}
     steps:
       - uses: actions/checkout@v4
 
-      # Same freshness guard as the Windows job, against the dmg asset.
-      - name: Assert the nightly dmg is fresh
+      # Half-publish guard: BOTH assets must be fresh AND replaced in the
+      # same build. The nightly publish job uploads the exe and dmg seconds
+      # apart, so if one asset is hours older than the other the release was
+      # only partially published (e.g. a build leg failed) and we must not
+      # smoke-test it. Uses each asset's updated_at, NOT release published_at
+      # (which stays at first creation for an in-place updated release).
+      - name: Assert both nightly assets are fresh and from the same build
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Asset updated_at, NOT release published_at: the nightly release
-          # is updated in place, so published_at stays at first creation while
-          # the assets are replaced each build.
-          asset=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.assets[] | select(.name == "nextar-macos.dmg") | .updated_at')
-          [ -n "$asset" ] || { echo "::error::nightly nextar-macos.dmg not found"; exit 1; }
-          published=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$asset" +%s)
+          set -euo pipefail
+          exe_ts=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.assets[] | select(.name == "nextar-setup.exe") | .updated_at')
+          dmg_ts=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.assets[] | select(.name == "nextar-macos.dmg") | .updated_at')
+          [ -n "$exe_ts" ] || { echo "::error::nightly nextar-setup.exe not found"; exit 1; }
+          [ -n "$dmg_ts" ] || { echo "::error::nightly nextar-macos.dmg not found"; exit 1; }
+          exe_s=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$exe_ts" +%s)
+          dmg_s=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$dmg_ts" +%s)
           now=$(date +%s)
-          age_h=$(( (now - published) / 3600 ))
-          echo "nightly nextar-macos.dmg updated: $asset (age ${age_h}h)"
-          [ "$age_h" -le 26 ] || { echo "::error::nightly dmg is ${age_h}h old - nightly likely failed"; exit 1; }
+          exe_age=$(( (now - exe_s) / 3600 ))
+          dmg_age=$(( (now - dmg_s) / 3600 ))
+          echo "nextar-setup.exe updated: $exe_ts (age ${exe_age}h)"
+          echo "nextar-macos.dmg  updated: $dmg_ts (age ${dmg_age}h)"
+          [ "$exe_age" -le 26 ] || { echo "::error::nextar-setup.exe is ${exe_age}h old - nightly likely failed"; exit 1; }
+          [ "$dmg_age" -le 26 ] || { echo "::error::nextar-macos.dmg is ${dmg_age}h old - nightly likely failed"; exit 1; }
+          delta=$(( dmg_s - exe_s ))
+          [ "$delta" -lt 0 ] && delta=$(( -delta ))
+          echo "assets updated ${delta}s apart (same build expects < 600s)"
+          [ "$delta" -le 600 ] || { echo "::error::assets were NOT published in the same build (${delta}s apart) - half-published release"; exit 1; }
 
       - name: Download the latest nightly dmg
         shell: bash
@@ -54,13 +72,25 @@ jobs:
 
       # Mounts the dmg, installs nextar.app + CLI to a throwaway dir, launches
       # the GUI briefly (time-bounded), upgrades in place, then uninstalls.
+      # The summary line ("N passed, M failed") is captured for the report job.
       - name: dmg install / launch / upgrade / uninstall E2E
+        id: e2e
         shell: bash
-        run: bash installers/macos/verify-install.sh "$RUNNER_TEMP/nextar-macos.dmg"
+        run: |
+          set +e
+          out=$(bash installers/macos/verify-install.sh "$RUNNER_TEMP/nextar-macos.dmg" 2>&1)
+          code=$?
+          set -e
+          printf '%s\n' "$out"
+          summary=$(printf '%s\n' "$out" | grep -E '^[0-9]+ passed' | tail -n 1 || true)
+          echo "summary=$summary" >> "$GITHUB_OUTPUT"
+          exit $code
 
   nightly-shell:
     runs-on: windows-latest
     needs: macos-dmg
+    outputs:
+      deep: ${{ steps.deep.outputs.summary }}
     steps:
       - uses: actions/checkout@v4
 
@@ -111,6 +141,39 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Run -InstallDir "$env:RUNNER_TEMP\nextar-smoke"
 
       - name: Deep smoke-test runner
+        id: deep
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-shell-test.ps1 -Deep -InstallDir "$env:RUNNER_TEMP\nextar-smoke"
+          $out = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-shell-test.ps1 -Deep -InstallDir "$env:RUNNER_TEMP\nextar-smoke" 2>&1
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          $summary = ($out | Select-String -Pattern '^\s*\d+ passed, \d+ failed' | Select-Object -Last 1).Line
+          "summary=$summary" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          exit $code
+
+  # Always runs (even when a job failed/skipped) and posts the per-job results
+  # to the nightly release, so a failed daily smoke is visible on the release
+  # page instead of only in the Actions tab.
+  report:
+    runs-on: ubuntu-latest
+    needs: [macos-dmg, nightly-shell]
+    if: always()
+    steps:
+      - name: Post smoke results to the nightly release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.id')
+          COMMIT=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.body' | grep -m1 '^- commit:' | awk '{print $3}')
+          MAC=${{ needs.macos-dmg.result }}
+          WIN=${{ needs.nightly-shell.result }}
+          MAC_SUMMARY="${{ needs.macos-dmg.outputs.summary }}"
+          DEEP_SUMMARY="${{ needs.nightly-shell.outputs.deep }}"
+          icon() { case "$1" in success) echo '✅';; failure) echo '❌';; *) echo '⚠️ skipped';; esac; }
+          BODY="## Daily smoke results\n\n- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- asset commit: \`${COMMIT}\`\n- macOS dmg E2E: $(icon "$MAC") \`$MAC_SUMMARY\`\n- Windows shell E2E: $(icon "$WIN") \`$DEEP_SUMMARY\`\n"
+          echo "--- posting ---"
+          printf '%b' "$BODY"
+          gh api --method POST "repos/${{ github.repository }}/releases/$RELEASE_ID/comments" -f body="$(printf '%b' "$BODY")" >/dev/null
+          echo "comment posted to release $RELEASE_ID"
