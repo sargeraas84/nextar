@@ -23,6 +23,10 @@ $ nextar repair damaged.next --volumes photos.next.nvol
 
 ## Screenshots
 
+🎬 **Demo** — boot splash → logo entrance → Home → all views:
+
+![nextar demo](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-demo.gif)
+
 ![Home](https://github.com/sargeraas84/nextar/releases/download/v0.1.0/nextar-home.png)
 
 | Create | Extract | Inspect |

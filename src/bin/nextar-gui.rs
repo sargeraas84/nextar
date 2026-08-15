@@ -4730,6 +4730,22 @@ fn main() -> eframe::Result {
             app.extract_banner = true;
         }
     }
+    // Screenshot/demo hook: seed the Create view's file list so the nightly
+    // screenshot job and the release gallery capture a populated view
+    // (NEXTAR_TEST_INPUTS=";"-separated paths, resolved relative to the
+    // current directory). Inert unless the variable is set — release builds
+    // are unaffected.
+    if let Ok(list) = std::env::var("NEXTAR_TEST_INPUTS") {
+        for part in list.split(';') {
+            let p = part.trim();
+            if !p.is_empty() && Path::new(p).exists() {
+                app.create_inputs.push(PathBuf::from(p));
+            }
+        }
+        if !app.create_inputs.is_empty() {
+            app.refresh_create_output();
+        }
+    }
 
     // Boot splash: a brief standalone synthwave window before the main UI.
     eframe::run_native(

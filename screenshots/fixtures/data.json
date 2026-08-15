@@ -1,0 +1,9 @@
+{
+  "name": "nextar",
+  "version": "0.1.0",
+  "codec": "zstd",
+  "level": 19,
+  "encryption": "xchacha20-poly1305",
+  "kdf": "argon2id",
+  "fec": "reed-solomon"
+}

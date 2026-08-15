@@ -227,7 +227,15 @@ jobs:
           grep -qx 'nextar-macos.dmg' /tmp/nightly-assets.txt || { echo "::error::nextar-macos.dmg missing from nightly release"; exit 1; }
           COUNT=$(wc -l < /tmp/nightly-assets.txt)
           echo "asset count: $COUNT"
-          [ "$COUNT" -eq 2 ] || { echo "::error::expected exactly 2 nightly assets, found $COUNT"; exit 1; }
+          # The screenshots workflow uploads six gallery PNGs (stable names,
+          # --clobber) after this build, so the release may hold 2 or 8
+          # assets depending on whether it has run yet. Reject anything
+          # outside that known set so a stray/unexpected asset still fails.
+          # The screenshots workflow uploads six gallery PNGs (stable names,
+          # --clobber) after this build, so the release may hold 2 or 8
+          # assets depending on whether it has run yet. Reject anything
+          # outside that known set so a stray/unexpected asset still fails.
+          [ "$COUNT" -eq 2 ] || [ "$COUNT" -eq 8 ] || { echo "::error::expected 2 binaries (+6 gallery pngs), found $COUNT assets"; exit 1; }
 
           # Byte-for-byte: the bytes GitHub serves must match the checksums
           # computed from the staged payloads earlier in this job.

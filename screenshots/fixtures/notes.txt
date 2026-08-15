@@ -1,0 +1,4 @@
+Ideas:
+- Per-file parallel compression is already in
+- Next: drop .nvol on the window to repair
+- Mail a .next straight from the Inspect view

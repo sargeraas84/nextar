@@ -1,0 +1,66 @@
+name: screenshots
+
+# Captures fresh screenshots of the running GUI and uploads them to the
+# `nightly` release so the release gallery and README never go stale. Runs
+# on a schedule (staggered after the nightly build at 04:37 UTC) and on
+# demand via workflow_dispatch.
+#
+# The upload uses stable asset names (nextar-home.png, nextar-create.png,
+# …) with --clobber, so URLs like
+#   https://github.com/<owner>/<repo>/releases/download/nightly/nextar-home.png
+# always serve the newest capture. The nightly job's post-publish verify
+# accepts exactly these six gallery assets alongside the two binaries.
+#
+# Requires a desktop session (CopyFromScreen): windows-latest runners run
+# interactively, so this works. The runner must also have a working GUI
+# launch — the capture script waits for the main window to settle before
+# navigating.
+
+on:
+  schedule:
+    - cron: '20 5 * * *' # daily at 05:20 UTC (after nightly's 04:37 build)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The GUI is captured from the freshly built exe (not the installed
+      # copy), and the sample archive is created with the CLI from the
+      # committed fixtures so the Inspect view has real content.
+      - name: Build the binaries
+        shell: bash
+        run: |
+          cargo build --release --bin nextar --bin nextar-gui
+          ./target/release/nextar.exe create screenshots/fixtures -o sample.next
+          ./target/release/nextar.exe list sample.next
+
+      - name: Capture all views
+        shell: pwsh
+        env:
+          SEED: "screenshots/fixtures/README.md;screenshots/fixtures/data.json;screenshots/fixtures/notes.txt;screenshots/fixtures/src/main.rs"
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/capture-screenshots.ps1 `
+            -Exe "$env:GITHUB_WORKSPACE/target/release/nextar-gui.exe" `
+            -OutDir "$env:GITHUB_WORKSPACE/staging" `
+            -ArchiveArg "sample.next" `
+            -Seed "$env:SEED"
+
+      - name: Upload to the nightly release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for f in nextar-home nextar-create nextar-extract nextar-inspect nextar-repair nextar-settings; do
+            gh release upload nightly "staging/$f.png" --clobber
+            echo "uploaded $f.png"
+          done
+          gh release view nightly --json assets --jq '[.assets[].name]'
