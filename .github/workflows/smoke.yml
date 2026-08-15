@@ -184,10 +184,22 @@ jobs:
           DEEP_SUMMARY="${{ needs.nightly-shell.outputs.deep }}"
           icon() { case "$1" in success) echo '✅';; failure) echo '❌';; *) echo '⚠️ skipped';; esac; }
           DAY=$(date -u +%F)
-          SMOKE="## Daily smoke results ($DAY)\n\n- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- asset commit: \`${COMMIT}\`\n- macOS dmg E2E: $(icon "$MAC") \`$MAC_SUMMARY\`\n- Windows shell E2E: $(icon "$WIN") \`$DEEP_SUMMARY\`\n"
+
+          # Daily log issue: resolve FIRST (create on first run) so the smoke
+          # section in both the release body and the comment can link it. The
+          # search API is slow/unreliable here; listing open issues and
+          # filtering by exact title in jq is fast and deterministic.
+          ISSUE=$(gh api "repos/$REPO/issues?state=open&per_page=100" --jq '[.[] | select(.title == "Daily smoke log")][0].number // empty')
+          if [ -z "$ISSUE" ]; then
+            ISSUE=$(gh api --method POST "repos/$REPO/issues" -f title="Daily smoke log" -f body="Canonical, append-only log of the daily scheduled smoke runs against the nightly release. Each run appends a dated entry below." --jq '.number')
+            echo "created daily log issue #$ISSUE"
+          fi
+
+          SMOKE="## Daily smoke results ($DAY)\n\n- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- asset commit: \`${COMMIT}\`\n- macOS dmg E2E: $(icon "$MAC") \`$MAC_SUMMARY\`\n- Windows shell E2E: $(icon "$WIN") \`$DEEP_SUMMARY\`\n- full history: #$ISSUE\n"
 
           # 1) Release body: keep the nightly's original body, dropping any
-          #    earlier smoke section (so it reflects today only).
+          #    earlier smoke section (so it reflects today only), then append
+          #    today's section which links the canonical log issue.
           ORIG=$(gh api "repos/$REPO/releases/$RELEASE_ID" --jq '.body')
           BASE=$(printf '%s' "$ORIG" | sed '/^## Daily smoke results/,$d' | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
           printf '%s\n\n%s' "$BASE" "$(printf '%b' "$SMOKE")" > /tmp/nightly-body.md
@@ -196,15 +208,7 @@ jobs:
           gh api --method PATCH "repos/$REPO/releases/$RELEASE_ID" -f body="$(cat /tmp/nightly-body.md)" --jq '.id' >/dev/null
           echo "body updated on release $RELEASE_ID"
 
-          # 2) Daily log issue: find the canonical issue by exact title, create
-          #    it on first run, then append a dated comment per run so the full
-          #    history is preserved even after the body is rewritten nightly.
-          #    (Search API is slow/unreliable here; listing open issues and
-          #    filtering by title in jq is fast and deterministic.)
-          ISSUE=$(gh api "repos/$REPO/issues?state=open&per_page=100" --jq '[.[] | select(.title == "Daily smoke log")][0].number // empty')
-          if [ -z "$ISSUE" ]; then
-            ISSUE=$(gh api --method POST "repos/$REPO/issues" -f title="Daily smoke log" -f body="Canonical, append-only log of the daily scheduled smoke runs against the nightly release. Each run appends a dated entry below." --jq '.number')
-            echo "created daily log issue #$ISSUE"
-          fi
+          # 2) Append a dated comment to the daily log issue for the permanent
+          #    history (the release body is rewritten nightly).
           gh api --method POST "repos/$REPO/issues/$ISSUE/comments" -f body="$(printf '%b' "$SMOKE")" --jq '.html_url'
           echo "logged to issue #$ISSUE"
