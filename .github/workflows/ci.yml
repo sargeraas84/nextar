@@ -64,6 +64,12 @@ jobs:
           cargo test
           cargo test --manifest-path setup/Cargo.toml
 
+      # Settings migration coverage: load the historical settings.json
+      # fixtures (tests/fixtures/settings/) and assert old values survive
+      # while newer fields fall back to defaults.
+      - name: Settings migration tests (historical fixtures)
+        run: cargo test --bin nextar-gui settings
+
       - name: Lint
         run: |
           cargo clippy --all-targets

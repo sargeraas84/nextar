@@ -308,6 +308,10 @@ static SETTINGS: Mutex<Settings> = Mutex::new(Settings {
     recent: None,
 });
 
+/// Set when the settings file exists but couldn't be parsed — the Settings
+/// view then offers a one-click reset instead of silently using defaults.
+static SETTINGS_CORRUPT: Mutex<bool> = Mutex::new(false);
+
 /// Settings file location: `%LOCALAPPDATA%\nextar\settings.json` (the same
 /// folder the installer uses), falling back to `./nextar-settings.json`
 /// when LOCALAPPDATA isn't set.
@@ -338,15 +342,37 @@ fn save_settings() {
     let _ = save_settings_at(&settings_path(), &s);
 }
 
-/// Load the persisted settings into the global at startup.
+/// Load the persisted settings into the global at startup. A missing file is
+/// a fresh install; a present-but-unreadable file is flagged as corrupt so
+/// the Settings view can offer to reset it.
 fn load_settings() {
-    if let Some(s) = load_settings_at(&settings_path()) {
-        *SETTINGS.lock().unwrap_or_else(|p| p.into_inner()) = s;
+    let p = settings_path();
+    match load_settings_at(&p) {
+        Some(s) => {
+            *SETTINGS.lock().unwrap_or_else(|p| p.into_inner()) = s;
+        }
+        None => {
+            if p.exists() {
+                *SETTINGS_CORRUPT.lock().unwrap_or_else(|p| p.into_inner()) = true;
+            }
+        }
     }
 }
 
 fn theme_override() -> ThemeOverride {
     SETTINGS.lock().map(|g| g.appearance).unwrap_or(ThemeOverride::Follow)
+}
+
+fn settings_corrupt() -> bool {
+    SETTINGS_CORRUPT.lock().map(|g| *g).unwrap_or(false)
+}
+
+/// Delete the unreadable settings file and fall back to defaults, clearing
+/// the corruption flag so the Settings view stops offering the reset.
+fn reset_corrupt_settings() {
+    let _ = std::fs::remove_file(settings_path());
+    *SETTINGS.lock().unwrap_or_else(|p| p.into_inner()) = Settings::default();
+    *SETTINGS_CORRUPT.lock().unwrap_or_else(|p| p.into_inner()) = false;
 }
 
 /// Apply a user-chosen appearance override (Settings view) and persist it.
@@ -2914,6 +2940,44 @@ impl GuiApp {
     fn view_settings(&mut self, ui: &mut egui::Ui) {
         view_heading(ui, Icon::Settings, "Settings", "Appearance, create defaults, and the Windows theme integration.");
 
+        // Corrupted settings: offer a one-click reset instead of silently
+        // running on defaults.
+        if settings_corrupt() {
+            egui::Frame::new()
+                .fill(surface2())
+                .stroke(Stroke::new(1.0, err()))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::same(14))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new("Your settings file couldn't be read — it may be corrupted.")
+                                .size(13.0)
+                                .strong()
+                                .color(text()),
+                        );
+                        ui.label(
+                            RichText::new("nextar is running on defaults. Reset to a clean settings file?")
+                                .size(12.0)
+                                .color(text2()),
+                        );
+                        ui.add_space(8.0);
+                        if ui.add(egui::Button::new("Reset settings")).clicked() {
+                            reset_corrupt_settings();
+                            self.theme_override = ThemeOverride::Follow;
+                            self.settings_codec = "zstd".to_string();
+                            self.settings_level = 3;
+                            self.settings_block = "1M".to_string();
+                            self.settings_threads = num_cpus::get();
+                            self.settings_recovery = 0;
+                            self.settings_block_error = false;
+                        }
+                    });
+                });
+            ui.add_space(12.0);
+        }
+
         // Live preview: the tile shows the palette the choice will produce
         // (the same eased cross-fade used everywhere in the app).
         egui::Frame::new()
@@ -4463,6 +4527,56 @@ mod tests {
         assert_eq!(load_settings_at(&path), Some(s));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn settings_fixtures_migrate_and_preserve_values() {
+        // Historical settings.json files (one per schema version) must load
+        // with their original values preserved and newer fields defaulted.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/settings");
+        let cases: &[(&str, Settings)] = &[
+            (
+                "v1-appearance-only.json",
+                Settings {
+                    appearance: ThemeOverride::Dark,
+                    codec: None,
+                    level: None,
+                    block: None,
+                    threads: None,
+                    recovery: None,
+                    recent: None,
+                },
+            ),
+            (
+                "v2-create-defaults.json",
+                Settings {
+                    appearance: ThemeOverride::Light,
+                    codec: Some("lzma2".to_string()),
+                    level: Some(9),
+                    block: Some("4M".to_string()),
+                    threads: Some(8),
+                    recovery: Some(16),
+                    recent: None,
+                },
+            ),
+            (
+                "v3-current.json",
+                Settings {
+                    appearance: ThemeOverride::Dark,
+                    codec: Some("zstd".to_string()),
+                    level: Some(5),
+                    block: Some("1M".to_string()),
+                    threads: Some(8),
+                    recovery: Some(4),
+                    recent: Some(vec!["C:\\Users\\alice\\Documents\\backup.next".to_string()]),
+                },
+            ),
+        ];
+        for (name, want) in cases {
+            let p = dir.join(name);
+            let s = load_settings_at(&p).unwrap_or_else(|| panic!("fixture {name} failed to load"));
+            assert_eq!(&s, want, "fixture {name} migrated to an unexpected settings value");
+        }
     }
 
     #[test]
