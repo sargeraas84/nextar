@@ -28,13 +28,23 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      # Tests must pass (bash -e fails the step otherwise); the summary is
-      # captured for the release body.
+      # Tests must pass; the summary is captured for the release body. The
+      # log is dumped on failure so a broken test/compile is diagnosable
+      # instead of being swallowed by bash -e.
       - name: Run tests and collect summary
         shell: bash
         run: |
+          set +e
           cargo test > "$RUNNER_TEMP/tests.log" 2>&1
+          RC1=$?
           cargo test --manifest-path setup/Cargo.toml >> "$RUNNER_TEMP/tests.log" 2>&1
+          RC2=$?
+          set -e
+          if [ $RC1 -ne 0 ] || [ $RC2 -ne 0 ]; then
+            echo "--- tests.log tail ---"
+            tail -n 120 "$RUNNER_TEMP/tests.log"
+            exit 1
+          fi
           grep -h '^test result:' "$RUNNER_TEMP/tests.log" | sed 's/^test result: //' > summary-windows.txt
           cat summary-windows.txt
 
