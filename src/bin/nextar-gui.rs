@@ -546,6 +546,28 @@ fn clear_recovery_log() {
     }
 }
 
+/// Reveal `path` in the OS file manager (selects the file on Windows/macOS,
+/// opens the parent folder on Linux).
+fn open_containing_folder(path: &Path) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("explorer.exe")
+            .arg("/select,")
+            .arg(path)
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(parent) = path.parent() {
+            let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+        }
+    }
+}
+
 /// Back up the settings file and delete the original. Returns the backup
 /// path, or None when no file existed. A successful backup is appended to
 /// `recovery.log` so resets stay auditable across launches.
@@ -1664,6 +1686,8 @@ struct GuiApp {
     settings_threads: usize,
     settings_recovery: u16,
     settings_log_limit: usize,
+    /// Inline confirm state for the Settings "Clear history" action.
+    confirm_clear_recovery: bool,
     // job plumbing
     job: Option<Job>,
     last_result: Option<std::result::Result<String, String>>,
@@ -1715,6 +1739,7 @@ impl Default for GuiApp {
             settings_threads: settings_create_threads(),
             settings_recovery: settings_create_recovery(),
             settings_log_limit: recovery_log_limit(),
+            confirm_clear_recovery: false,
             job: None,
             last_result: None,
             settings_reset_notice: None,
@@ -3440,12 +3465,23 @@ impl GuiApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Recovery history").size(12.0).color(text3()));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
+                if self.confirm_clear_recovery {
+                    if ui
+                        .add(egui::Button::new(RichText::new("Yes, clear").color(err())))
+                        .clicked()
+                    {
+                        clear_recovery_log();
+                        self.confirm_clear_recovery = false;
+                    }
+                    if ui.small_button("Cancel").clicked() {
+                        self.confirm_clear_recovery = false;
+                    }
+                } else if ui
                     .small_button("Clear history")
                     .on_hover_text("Truncate recovery.log (removes all recorded resets)")
                     .clicked()
                 {
-                    clear_recovery_log();
+                    self.confirm_clear_recovery = true;
                 }
             });
         });
@@ -3499,6 +3535,13 @@ impl GuiApp {
                                                 .clicked()
                                             {
                                                 ui.ctx().copy_text(entry.backup.clone());
+                                            }
+                                            if ui
+                                                .small_button("open folder")
+                                                .on_hover_text("Reveal the backup file in the file manager")
+                                                .clicked()
+                                            {
+                                                open_containing_folder(Path::new(&entry.backup));
                                             }
                                         },
                                     );
@@ -5076,6 +5119,38 @@ mod tests {
         assert_eq!(clamp_log_limit(25), 25);
         assert_eq!(clamp_log_limit(50), 50);
         assert_eq!(clamp_log_limit(1_000_000), 1000);
+    }
+
+    #[test]
+    fn settings_recovery_log_limit_migrates_and_round_trips() {
+        let dir = std::env::temp_dir().join(format!("nextar-settings-limit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+
+        // Older schemas predate recovery_log_limit: it must default to None
+        // while the values they do carry survive.
+        std::fs::write(&path, "{\"appearance\":\"dark\",\"codec\":\"zstd\"}").unwrap();
+        let s = load_settings_at(&path).unwrap();
+        assert_eq!(s.appearance, ThemeOverride::Dark);
+        assert_eq!(s.codec.as_deref(), Some("zstd"));
+        assert_eq!(s.recovery_log_limit, None, "old files default the limit to None");
+
+        // A configured value survives a full save/load round trip.
+        let configured = Settings {
+            appearance: ThemeOverride::Dark,
+            codec: None,
+            level: None,
+            block: None,
+            threads: None,
+            recovery: None,
+            recovery_log_limit: Some(30),
+            recent: None,
+        };
+        save_settings_at(&path, &configured).unwrap();
+        assert_eq!(load_settings_at(&path), Some(configured));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
