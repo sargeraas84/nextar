@@ -5006,7 +5006,9 @@ mod tests {
 
     #[test]
     fn corrupt_backup_path_keeps_same_directory() {
-        let p = Path::new("C:\\Users\\me\\AppData\\Local\\nextar\\settings.json");
+        // Forward slashes so this exercises the same parent/file_name logic
+        // on Windows and Unix (backslashes aren't separators on Unix).
+        let p = Path::new("C:/Users/me/AppData/Local/nextar/settings.json");
         let b = corrupt_backup_path(p);
         assert_eq!(b.parent(), p.parent(), "backup must live next to the original");
         let name = b.file_name().unwrap().to_string_lossy().into_owned();
