@@ -392,10 +392,24 @@ fn backup_and_remove_settings() -> Option<PathBuf> {
 
 /// Delete the unreadable settings file (keeping a backup) and fall back to
 /// defaults, clearing the corruption flag so the view stops offering reset.
-fn reset_corrupt_settings() {
-    let _ = backup_and_remove_settings();
+/// Returns the backup path when a file existed, so the UI can point at it.
+fn reset_corrupt_settings() -> Option<PathBuf> {
+    let backup = backup_and_remove_settings();
     *SETTINGS.lock().unwrap_or_else(|p| p.into_inner()) = Settings::default();
     *SETTINGS_CORRUPT.lock().unwrap_or_else(|p| p.into_inner()) = false;
+    backup
+}
+
+/// Compact one-line warning for transient windows (splash, shell) when the
+/// settings file couldn't be read; a no-op otherwise.
+fn corrupt_settings_note(ui: &mut egui::Ui) {
+    if settings_corrupt() {
+        ui.label(
+            RichText::new("! settings corrupted — running on defaults")
+                .size(11.0)
+                .color(err()),
+        );
+    }
 }
 
 /// Apply a user-chosen appearance override (Settings view) and persist it.
@@ -1470,6 +1484,8 @@ struct GuiApp {
     // job plumbing
     job: Option<Job>,
     last_result: Option<std::result::Result<String, String>>,
+    /// Dismissible notice showing where a corrupt settings file was backed up.
+    settings_reset_notice: Option<String>,
     /// Last title sent to the OS window (dedupe for `ViewportCommand::Title`).
     window_title: String,
 }
@@ -1517,6 +1533,7 @@ impl Default for GuiApp {
             settings_recovery: settings_create_recovery(),
             job: None,
             last_result: None,
+            settings_reset_notice: None,
             window_title: "nextar".to_string(),
         }
     }
@@ -2987,7 +3004,7 @@ impl GuiApp {
                         );
                         ui.add_space(8.0);
                         if ui.add(egui::Button::new("Reset settings")).clicked() {
-                            reset_corrupt_settings();
+                            let backup = reset_corrupt_settings();
                             self.theme_override = ThemeOverride::Follow;
                             self.settings_codec = "zstd".to_string();
                             self.settings_level = 3;
@@ -2995,6 +3012,37 @@ impl GuiApp {
                             self.settings_threads = num_cpus::get();
                             self.settings_recovery = 0;
                             self.settings_block_error = false;
+                            self.settings_reset_notice = backup.map(|b| b.display().to_string());
+                        }
+                    });
+                });
+            ui.add_space(12.0);
+        }
+
+        // After a reset, point at the backup file so the user can recover it.
+        if let Some(backup) = self.settings_reset_notice.clone() {
+            egui::Frame::new()
+                .fill(surface2())
+                .stroke(Stroke::new(1.0, neon_cyan()))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::same(14))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new("Settings reset.")
+                                .size(13.0)
+                                .strong()
+                                .color(text()),
+                        );
+                        ui.label(
+                            RichText::new(format!("Your previous file was backed up to {backup}"))
+                                .size(12.0)
+                                .color(text2()),
+                        );
+                        ui.add_space(6.0);
+                        if ui.add(egui::Button::new("Dismiss")).clicked() {
+                            self.settings_reset_notice = None;
                         }
                     });
                 });
@@ -4041,6 +4089,7 @@ impl eframe::App for ShellApp {
                 ui.label(RichText::new("NEXTAR").size(16.0).strong());
             });
             ui.add_space(6.0);
+            corrupt_settings_note(ui);
 
             if let ShellJob::Bad(msg) = &self.job {
                 ui.label(RichText::new(msg).color(err()).size(13.0));
@@ -4225,6 +4274,15 @@ fn draw_splash_scene(ctx: &egui::Context, t: f32) {
         egui::FontId::proportional(10.0),
         alpha(text3(), a),
     );
+    if settings_corrupt() {
+        p.text(
+            egui::pos2(cx, screen.bottom() - 12.0),
+            egui::Align2::CENTER_CENTER,
+            "! settings corrupted — running on defaults",
+            egui::FontId::proportional(11.0),
+            alpha(err(), a),
+        );
+    }
 }
 
 /// Small standalone boot window: plays the scene, then closes so the main
@@ -4274,6 +4332,21 @@ fn main() -> eframe::Result {
         match backup_and_remove_settings() {
             Some(backup) => println!("nextar: settings reset — backed up to {}", backup.display()),
             None => println!("nextar: no settings file at {}", settings_path().display()),
+        }
+        return Ok(());
+    }
+
+    // `--check-settings` → validate settings.json for scripts/CI: exit 0 when
+    // valid or absent, exit 1 when present but unreadable.
+    if args.iter().any(|a| a == "--check-settings") {
+        let p = settings_path();
+        if load_settings_at(&p).is_some() {
+            println!("nextar: settings ok ({})", p.display());
+        } else if p.exists() {
+            eprintln!("nextar: settings corrupt ({})", p.display());
+            std::process::exit(1);
+        } else {
+            println!("nextar: no settings file ({})", p.display());
         }
         return Ok(());
     }
