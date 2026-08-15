@@ -1,13 +1,18 @@
 name: smoke
 
-# Daily scheduled smoke run against the ACTUAL shipped nightly build, on a
-# dedicated runner. CI rebuilds from source; this instead downloads the
-# installer from the `nightly` release and drives the real Explorer shell
-# integration against it - registry verbs, Explorer verb resolution, actual
-# verb invocations (compress / extract / repair, encrypted-repair), and the
-# deep scenario runner - so regressions in the packaged artifacts are caught
-# even on days with no commits. Runs ~1h after the nightly build so the
-# release is fresh; also triggerable manually.
+# Daily scheduled smoke run against the ACTUAL shipped nightly build, on
+# dedicated runners. CI rebuilds from source; this instead downloads the
+# installers from the `nightly` release and drives the real packaging
+# against them:
+#   - macOS job: mounts the shipped .dmg, installs nextar.app + CLI, launches
+#     the GUI, upgrades in place, then uninstalls (verify-install.sh).
+#   - Windows job: installs the shipped setup.exe to a temp prefix and drives
+#     the real Explorer shell integration - registry verbs, verb resolution,
+#     actual verb invocations (compress / extract / repair, encrypted-
+#     repair), and the deep scenario runner.
+# The macOS job runs FIRST and gates the Windows job, so a broken dmg aborts
+# the run before the (expensive) Windows smoke starts. Runs ~1h after the
+# nightly build so the release is fresh; also triggerable manually.
 
 on:
   schedule:
@@ -18,8 +23,42 @@ permissions:
   contents: read
 
 jobs:
+  # macOS first: cheap (~2 min) and gates the Windows job below.
+  macos-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same freshness guard as the Windows job, against the dmg asset.
+      - name: Assert the nightly dmg is fresh
+        shell: bash
+        run: |
+          # Asset updated_at, NOT release published_at: the nightly release
+          # is updated in place, so published_at stays at first creation while
+          # the assets are replaced each build.
+          asset=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.assets[] | select(.name == "nextar-macos.dmg") | .updated_at')
+          [ -n "$asset" ] || { echo "::error::nightly nextar-macos.dmg not found"; exit 1; }
+          published=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$asset" +%s)
+          now=$(date +%s)
+          age_h=$(( (now - published) / 3600 ))
+          echo "nightly nextar-macos.dmg updated: $asset (age ${age_h}h)"
+          [ "$age_h" -le 26 ] || { echo "::error::nightly dmg is ${age_h}h old - nightly likely failed"; exit 1; }
+
+      - name: Download the latest nightly dmg
+        shell: bash
+        run: |
+          curl -fL -o "$RUNNER_TEMP/nextar-macos.dmg" "https://github.com/${{ github.repository }}/releases/download/nightly/nextar-macos.dmg"
+          ls -la "$RUNNER_TEMP/nextar-macos.dmg"
+
+      # Mounts the dmg, installs nextar.app + CLI to a throwaway dir, launches
+      # the GUI briefly (time-bounded), upgrades in place, then uninstalls.
+      - name: dmg install / launch / upgrade / uninstall E2E
+        shell: bash
+        run: bash installers/macos/verify-install.sh "$RUNNER_TEMP/nextar-macos.dmg"
+
   nightly-shell:
     runs-on: windows-latest
+    needs: macos-dmg
     steps:
       - uses: actions/checkout@v4
 

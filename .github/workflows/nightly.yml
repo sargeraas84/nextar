@@ -194,10 +194,11 @@ jobs:
 
       # Post-publish guard: softprops only verifies the LOCAL files matched.
       # This asserts the release actually serves them - both stable download
-      # URLs must answer 200 and the release must carry exactly the two
-      # expected assets - so a regression like the dist/-prefix bug fails the
-      # nightly run instead of silently shipping a 404 to the landing page
-      # and the smoke runner.
+      # URLs must answer 200, the release must carry exactly the two expected
+      # assets, and each served file's SHA-256 must equal the staged checksum
+      # - so a regression like the dist/-prefix bug fails the nightly run
+      # instead of silently shipping a 404 (or wrong bytes) to the landing
+      # page and the smoke runner.
       - name: Verify nightly release serves the assets
         shell: bash
         env:
@@ -227,4 +228,17 @@ jobs:
           COUNT=$(wc -l < /tmp/nightly-assets.txt)
           echo "asset count: $COUNT"
           [ "$COUNT" -eq 2 ] || { echo "::error::expected exactly 2 nightly assets, found $COUNT"; exit 1; }
-          echo "✅ nightly release verified: 2 assets, both downloads 200"
+
+          # Byte-for-byte: the bytes GitHub serves must match the checksums
+          # computed from the staged payloads earlier in this job.
+          curl -fL -o /tmp/nightly-setup.exe "https://github.com/${{ github.repository }}/releases/download/nightly/nextar-setup.exe"
+          curl -fL -o /tmp/nightly-macos.dmg "https://github.com/${{ github.repository }}/releases/download/nightly/nextar-macos.dmg"
+          EXE_SERVED=$(sha256sum /tmp/nightly-setup.exe | awk '{print $1}')
+          DMG_SERVED=$(sha256sum /tmp/nightly-macos.dmg | awk '{print $1}')
+          EXE_EXPECTED=$(awk '{print $1}' assets/nextar-setup.exe.sha256)
+          DMG_EXPECTED=$(awk '{print $1}' assets/nextar-macos.dmg.sha256)
+          echo "nextar-setup.exe served=$EXE_SERVED expected=$EXE_EXPECTED"
+          echo "nextar-macos.dmg  served=$DMG_SERVED expected=$DMG_EXPECTED"
+          [ "$EXE_SERVED" = "$EXE_EXPECTED" ] || { echo "::error::nextar-setup.exe checksum mismatch"; exit 1; }
+          [ "$DMG_SERVED" = "$DMG_EXPECTED" ] || { echo "::error::nextar-macos.dmg checksum mismatch"; exit 1; }
+          echo "✅ nightly release verified: 2 assets, both downloads 200, checksums match"
