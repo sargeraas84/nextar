@@ -367,10 +367,33 @@ fn settings_corrupt() -> bool {
     SETTINGS_CORRUPT.lock().map(|g| *g).unwrap_or(false)
 }
 
-/// Delete the unreadable settings file and fall back to defaults, clearing
-/// the corruption flag so the Settings view stops offering the reset.
+/// Backup path for a settings file (same directory, timestamped name), so a
+/// reset never destroys the user's only copy.
+fn corrupt_backup_path(p: &Path) -> PathBuf {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    p.with_extension(format!("json.corrupt-{ts}"))
+}
+
+/// Back up the settings file and delete the original. Returns the backup
+/// path, or None when no file existed.
+fn backup_and_remove_settings() -> Option<PathBuf> {
+    let p = settings_path();
+    if !p.exists() {
+        return None;
+    }
+    let backup = corrupt_backup_path(&p);
+    let _ = std::fs::copy(&p, &backup);
+    let _ = std::fs::remove_file(&p);
+    Some(backup)
+}
+
+/// Delete the unreadable settings file (keeping a backup) and fall back to
+/// defaults, clearing the corruption flag so the view stops offering reset.
 fn reset_corrupt_settings() {
-    let _ = std::fs::remove_file(settings_path());
+    let _ = backup_and_remove_settings();
     *SETTINGS.lock().unwrap_or_else(|p| p.into_inner()) = Settings::default();
     *SETTINGS_CORRUPT.lock().unwrap_or_else(|p| p.into_inner()) = false;
 }
@@ -2958,7 +2981,7 @@ impl GuiApp {
                                 .color(text()),
                         );
                         ui.label(
-                            RichText::new("nextar is running on defaults. Reset to a clean settings file?")
+                            RichText::new("nextar is running on defaults. Reset to a clean settings file? Your current file will be backed up first.")
                                 .size(12.0)
                                 .color(text2()),
                         );
@@ -4245,6 +4268,16 @@ fn main() -> eframe::Result {
     load_settings();
     let args: Vec<String> = std::env::args().skip(1).collect();
 
+    // `--reset-settings` → headless recovery: back up and delete the settings
+    // file, then exit without opening any window.
+    if args.iter().any(|a| a == "--reset-settings") {
+        match backup_and_remove_settings() {
+            Some(backup) => println!("nextar: settings reset — backed up to {}", backup.display()),
+            None => println!("nextar: no settings file at {}", settings_path().display()),
+        }
+        return Ok(());
+    }
+
     // `--run` → Explorer right-click shell mode: a small progress window.
     if let Some(first) = args.first() {
         if first == "--run" {
@@ -4577,6 +4610,19 @@ mod tests {
             let s = load_settings_at(&p).unwrap_or_else(|| panic!("fixture {name} failed to load"));
             assert_eq!(&s, want, "fixture {name} migrated to an unexpected settings value");
         }
+    }
+
+    #[test]
+    fn corrupt_backup_path_keeps_same_directory() {
+        let p = Path::new("C:\\Users\\me\\AppData\\Local\\nextar\\settings.json");
+        let b = corrupt_backup_path(p);
+        assert_eq!(b.parent(), p.parent(), "backup must live next to the original");
+        let name = b.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with("settings.json.corrupt-"),
+            "backup name should be timestamped, got {name}"
+        );
+        assert_ne!(name, "settings.json", "backup must not overwrite the original name");
     }
 
     #[test]
