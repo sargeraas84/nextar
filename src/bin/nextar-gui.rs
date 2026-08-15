@@ -4411,6 +4411,61 @@ mod tests {
     }
 
     #[test]
+    fn settings_migrate_from_older_schema() {
+        let dir = std::env::temp_dir().join(format!("nextar-settings-migrate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+
+        // v1 schema: only the appearance pin existed. Its value must survive
+        // the upgrade, and every field added later falls back to its default.
+        std::fs::write(&path, "{\"appearance\":\"dark\"}").unwrap();
+        let s = load_settings_at(&path).unwrap();
+        assert_eq!(s.appearance, ThemeOverride::Dark, "v1 appearance value must be preserved");
+        assert_eq!(s.codec, None);
+        assert_eq!(s.level, None);
+        assert_eq!(s.block, None);
+        assert_eq!(s.threads, None);
+        assert_eq!(s.recovery, None);
+        assert_eq!(s.recent, None);
+
+        // v2 schema: create defaults existed but `recent` did not. Existing
+        // values survive; the newer `recent` field defaults to None.
+        std::fs::write(
+            &path,
+            "{\"appearance\":\"light\",\"codec\":\"lzma2\",\"level\":9,\"block\":\"4M\",\"threads\":8,\"recovery\":16}",
+        )
+        .unwrap();
+        let s = load_settings_at(&path).unwrap();
+        assert_eq!(s.appearance, ThemeOverride::Light);
+        assert_eq!(s.codec.as_deref(), Some("lzma2"));
+        assert_eq!(s.level, Some(9));
+        assert_eq!(s.block.as_deref(), Some("4M"));
+        assert_eq!(s.threads, Some(8));
+        assert_eq!(s.recovery, Some(16));
+        assert_eq!(s.recent, None, "v2 files have no recent list");
+
+        // forward compatibility: fields written by a *future* version are
+        // ignored, and the settings still load with everything we know.
+        std::fs::write(
+            &path,
+            "{\"appearance\":\"light\",\"future_field\":{\"x\":1},\"unknown\":true}",
+        )
+        .unwrap();
+        let s = load_settings_at(&path).unwrap();
+        assert_eq!(s.appearance, ThemeOverride::Light);
+        assert_eq!(s.codec, None);
+        assert_eq!(s.recent, None);
+
+        // a migrated file re-saves as a complete current-schema file that
+        // loads back identically.
+        save_settings_at(&path, &s).unwrap();
+        assert_eq!(load_settings_at(&path), Some(s));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn colorref_packs_bgr() {
         // COLORREF is 0x00BBGGRR — blue in the high byte, red in the low.
         assert_eq!(colorref(Color32::from_rgb(0x11, 0x22, 0x33)), 0x0033_2211);

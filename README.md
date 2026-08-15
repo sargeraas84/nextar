@@ -283,6 +283,14 @@ the platform's verify command (`Get-FileHash` on Windows, `shasum` on
 macOS) — populated from the same release data. Versioned builds ship
 separately via the `release` workflow (tag `v*` or manual dispatch).
 
+**CI gates & branch protection** — `.github/workflows/ci.yml` runs the Rust
+tests, the Explorer shell-verification suite, and the installer E2E
+lifecycles (a payload-only `--no-shell` cycle plus a full install → upgrade
+→ uninstall that asserts `settings.json` survives). The `release` workflow
+runs the same E2E before attaching artifacts. To also block direct pushes to
+`master` until those checks pass, enable branch protection once with
+`bash scripts/setup-branch-protection.sh <owner>/<repo>` (needs `gh auth login`).
+
 See **`docs/FORMAT.md`** for the complete binary layout of the `.NEXT`
 archive and `.nvol` volume, and **`docs/ARCHITECTURE.md`** for the module
 breakdown, pipeline design and threat model.

@@ -53,16 +53,31 @@ check "app bundle has Info.plist" test -f "$APP/Contents/Info.plist"
 check "app bundle has the icon" test -f "$APP/Contents/Resources/nextar.icns"
 check "installed CLI runs" "$APPS/nextar" --version
 
-# launch the GUI briefly to prove nextar-gui actually starts on macOS
-"$APP/Contents/MacOS/nextar-gui" >/dev/null 2>&1 &
+# launch the GUI briefly to prove nextar-gui actually starts on macOS.
+# Time-bounded: poll up to ~12s for the process to stay alive; if it exits
+# early, dump the captured log + a screenshot for diagnosis.
+GUI_LOG="$ROOT/gui.log"
+"$APP/Contents/MacOS/nextar-gui" >"$GUI_LOG" 2>&1 &
 GUI_PID=$!
-sleep 6
+
+gui_alive=0
+for ((i = 0; i < 12; i++)); do
+  if ! kill -0 "$GUI_PID" 2>/dev/null; then
+    break
+  fi
+  sleep 1
+done
 if kill -0 "$GUI_PID" 2>/dev/null; then
   gui_alive=1
   kill "$GUI_PID" 2>/dev/null || true
   wait "$GUI_PID" 2>/dev/null || true
 else
-  gui_alive=0
+  echo "    --- nextar-gui exited early; last 40 log lines ---"
+  tail -n 40 "$GUI_LOG" 2>/dev/null || true
+  if command -v screencapture >/dev/null 2>&1; then
+    screencapture -x "$ROOT/gui-crash.png" 2>/dev/null || true
+    echo "    --- screenshot: $ROOT/gui-crash.png ---"
+  fi
 fi
 check "GUI launches and stays alive" test "$gui_alive" -eq 1
 
