@@ -1,21 +1,24 @@
 name: nightly
 
 # Publishes a rolling "nightly" build to a GitHub Release tagged `nightly`
-# on every push to master. Asset names are FIXED (`nextar-setup.exe`,
-# `nextar-macos.dmg`), so the landing page can link the latest build with a
-# stable URL:
+# on every push to master and once a day (UTC) so a build exists even on
+# quiet days. Asset names are FIXED (`nextar-setup.exe`, `nextar-macos.dmg`),
+# so the landing page can link the latest build with a stable URL:
 #
 #   https://github.com/<owner>/<repo>/releases/download/nightly/nextar-setup.exe
 #   https://github.com/<owner>/<repo>/releases/download/nightly/nextar-macos.dmg
 #
-# The tag/release is updated in place on each run (overwrite: true), so the
-# URLs always serve the newest build. The release body carries the commit
-# subject, test results and SHA-256 checksums (read by the landing page's
-# live badges). Versioned builds ship separately via the release workflow.
+# The tag/release is updated in place on each run (overwrite_files: true),
+# so the URLs always serve the newest build. The release body carries the
+# commit subject, test results and SHA-256 checksums (read by the landing
+# page's live badges). Versioned builds ship separately via the release
+# workflow.
 
 on:
   push:
     branches: [master]
+  schedule:
+    - cron: '37 4 * * *' # daily at 04:37 UTC (staggered from CI's 05:17)
 
 permissions:
   contents: write

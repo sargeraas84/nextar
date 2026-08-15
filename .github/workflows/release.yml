@@ -66,8 +66,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # The setup crate embeds target/release/nextar.exe + nextar-gui.exe via
+      # include_bytes!, so build the payload before running its tests (package.sh
+      # reuses this cache).
       - name: Run tests before shipping
         run: |
+          cargo build --release --bin nextar --bin nextar-gui
           cargo test
           cargo test --manifest-path setup/Cargo.toml
 
