@@ -76,35 +76,35 @@ struct Palette {
 }
 
 const UI_DARK: Palette = Palette {
-    bg2: Color32::from_rgb(0x13, 0x0c, 0x24),
-    surface: Color32::from_rgb(0x1c, 0x12, 0x31),
-    surface2: Color32::from_rgb(0x2b, 0x1d, 0x4b),
-    border: Color32::from_rgb(0x3a, 0x2a, 0x63),
-    text: Color32::from_rgb(0xf1, 0xec, 0xff),
-    text2: Color32::from_rgb(0xb8, 0xa8, 0xd9),
-    text3: Color32::from_rgb(0x6f, 0x5d, 0x99),
-    accent: Color32::from_rgb(0x00, 0xff, 0xf7),
-    accent2: Color32::from_rgb(0x9b, 0x5c, 0xff),
-    accent3: Color32::from_rgb(0xff, 0x2b, 0xd6),
-    ok: Color32::from_rgb(0x2e, 0xff, 0xb0),
-    err: Color32::from_rgb(0xff, 0x4d, 0x6d),
-    active: Color32::from_rgb(0x10, 0x0e, 0x1e),
+    bg2: Color32::from_rgb(0x07, 0x0a, 0x11), // near-black glass void
+    surface: Color32::from_rgb(0x11, 0x17, 0x24),
+    surface2: Color32::from_rgb(0x19, 0x21, 0x31),
+    border: Color32::from_rgb(0x24, 0x2e, 0x42),
+    text: Color32::from_rgb(0xf4, 0xf6, 0xfb),
+    text2: Color32::from_rgb(0xa4, 0xae, 0xc4),
+    text3: Color32::from_rgb(0x64, 0x70, 0x88),
+    accent: Color32::from_rgb(0x5f, 0xf2, 0xff), // ice cyan
+    accent2: Color32::from_rgb(0x8b, 0x7b, 0xff), // violet
+    accent3: Color32::from_rgb(0xff, 0x5f, 0xd7), // pink
+    ok: Color32::from_rgb(0x4c, 0xdf, 0x9e),
+    err: Color32::from_rgb(0xff, 0x5f, 0x7a),
+    active: Color32::from_rgb(0x0d, 0x12, 0x1d),
 };
 
 const UI_LIGHT: Palette = Palette {
-    bg2: Color32::from_rgb(0xea, 0xe5, 0xf4),
-    surface: Color32::from_rgb(0xff, 0xfe, 0xff),
-    surface2: Color32::from_rgb(0xe6, 0xdf, 0xf2),
-    border: Color32::from_rgb(0xd3, 0xc9, 0xe8),
-    text: Color32::from_rgb(0x21, 0x1a, 0x3a),
-    text2: Color32::from_rgb(0x58, 0x49, 0x7d),
-    text3: Color32::from_rgb(0x94, 0x87, 0xb5),
-    accent: Color32::from_rgb(0x00, 0xb3, 0xc9),
-    accent2: Color32::from_rgb(0x77, 0x45, 0xe8),
-    accent3: Color32::from_rgb(0xe0, 0x19, 0xa8),
-    ok: Color32::from_rgb(0x0f, 0xa8, 0x71),
-    err: Color32::from_rgb(0xd9, 0x26, 0x4b),
-    active: Color32::from_rgb(0xe8, 0xe0, 0xf6),
+    bg2: Color32::from_rgb(0xea, 0xee, 0xf5), // cool silver-white
+    surface: Color32::from_rgb(0xff, 0xff, 0xff),
+    surface2: Color32::from_rgb(0xe3, 0xe8, 0xf1),
+    border: Color32::from_rgb(0xd3, 0xdb, 0xe7),
+    text: Color32::from_rgb(0x18, 0x1d, 0x2a),
+    text2: Color32::from_rgb(0x4d, 0x58, 0x6c),
+    text3: Color32::from_rgb(0x8a, 0x94, 0xa8),
+    accent: Color32::from_rgb(0x0a, 0x97, 0xbf), // deep cyan on white
+    accent2: Color32::from_rgb(0x66, 0x4b, 0xe8), // violet
+    accent3: Color32::from_rgb(0xd4, 0x2e, 0xb6), // pink
+    ok: Color32::from_rgb(0x0f, 0x9d, 0x6f),
+    err: Color32::from_rgb(0xd9, 0x37, 0x55),
+    active: Color32::from_rgb(0xe1, 0xe6, 0xef),
 };
 
 static CURRENT_PALETTE: Mutex<Palette> = Mutex::new(UI_DARK);
@@ -153,7 +153,6 @@ fn ok() -> Color32 { current_palette().ok }
 fn err() -> Color32 { current_palette().err }
 fn active() -> Color32 { current_palette().active }
 fn neon_cyan() -> Color32 { current_palette().accent }
-fn neon_pink() -> Color32 { current_palette().accent3 }
 
 // ------------------------------------------------------------ actions
 #[derive(Clone)]
@@ -642,6 +641,10 @@ fn lerp8(x: u8, y: u8, t: f32) -> u8 {
     (x as f32 + (y as f32 - x as f32) * t.clamp(0.0, 1.0)).round() as u8
 }
 
+fn lerpf(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t.clamp(0.0, 1.0)
+}
+
 fn smoothstep(x: f32, a: f32, b: f32) -> f32 {
     let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -654,21 +657,22 @@ fn alpha(c: Color32, a: f32) -> Color32 {
 }
 
 // ------------------------------------------------------------- logo palette
-/// Light/dark tile + chrome colors for the brand lockup, mirroring
+/// Light/dark tile + mark colors for the brand lockup, mirroring
 /// nextar-gui. The wizard picks the palette from the Windows apps theme.
-/// Clean vector look: smooth glass tile + hairline bezel, mitered chevrons
-/// with one along-bar gradient each.
+/// Clean vector look: smooth glass tile + hairline bezel carrying three
+/// converging chevron planes (violet → indigo → cyan) that feed a bright
+/// core node with a soft glow.
 #[derive(Clone, Copy)]
 struct LogoPalette {
     tile_a: Color32,
     tile_b: Color32,
     tile_c: Color32,
     tile_mag: Color32,
-    back_a: Color32,
-    back_b: Color32,
-    front_a: Color32,
-    front_b: Color32,
-    lit: Color32, // cyan lit-chrome edge along the front chevron (with alpha)
+    layer_a: Color32,
+    layer_b: Color32,
+    layer_c: Color32,
+    core: Color32,
+    glow: Color32, // cyan core glow (with alpha)
     bezel: Color32,
 }
 
@@ -677,11 +681,11 @@ const LIGHT_PALETTE: LogoPalette = LogoPalette {
     tile_b: Color32::from_rgb(0xe0, 0xee, 0xf9),
     tile_c: Color32::from_rgb(0xbf, 0xd9, 0xf0),
     tile_mag: Color32::from_rgb(0xff, 0x9e, 0xe6),
-    back_a: Color32::from_rgb(0x21, 0x36, 0x4e), // dim, receding cool steel
-    back_b: Color32::from_rgb(0x66, 0xa0, 0xbe), // muted cyan steel tip
-    front_a: Color32::from_rgb(0x19, 0x23, 0x37), // deep cool gunmetal base
-    front_b: Color32::from_rgb(0xd8, 0xe2, 0xec), // bright cool silver tip
-    lit: Color32::from_rgba_unmultiplied_const(0x9d, 0xee, 0xff, 150),
+    layer_a: Color32::from_rgb(0x6b, 0x33, 0xb8), // deep violet (contrast on white)
+    layer_b: Color32::from_rgb(0x2f, 0x5f, 0xc8), // indigo
+    layer_c: Color32::from_rgb(0x00, 0x8f, 0xc7), // cyan
+    core: Color32::from_rgb(0x00, 0xa8, 0xdd),    // cyan core node
+    glow: Color32::from_rgba_unmultiplied_const(0x00, 0xb3, 0xe6, 120),
     bezel: Color32::from_rgba_unmultiplied_const(0x00, 0xd9, 0xff, 230), // neon cyan ring
 };
 
@@ -690,11 +694,11 @@ const DARK_PALETTE: LogoPalette = LogoPalette {
     tile_b: Color32::from_rgb(0x14, 0x2b, 0x52),
     tile_c: Color32::from_rgb(0x1c, 0x3a, 0x6a),
     tile_mag: Color32::from_rgb(0xff, 0x2b, 0xd6),
-    back_a: Color32::from_rgb(0x1d, 0x33, 0x4c), // dim, receding cool steel
-    back_b: Color32::from_rgb(0x5c, 0x8f, 0xad), // muted cyan steel tip
-    front_a: Color32::from_rgb(0x2c, 0x3a, 0x50), // cool gunmetal base
-    front_b: Color32::from_rgb(0xf4, 0xf8, 0xfc), // white-hot chrome tip
-    lit: Color32::from_rgba_unmultiplied_const(0x8a, 0xe8, 0xff, 170),
+    layer_a: Color32::from_rgb(0x8b, 0x5c, 0xf6), // electric violet
+    layer_b: Color32::from_rgb(0x5a, 0x7c, 0xf8), // neon indigo
+    layer_c: Color32::from_rgb(0x37, 0xe6, 0xff), // electric cyan
+    core: Color32::from_rgb(0x5e, 0xf2, 0xff),    // ice cyan core node
+    glow: Color32::from_rgba_unmultiplied_const(0x5e, 0xf2, 0xff, 150),
     bezel: Color32::from_rgba_unmultiplied_const(0x5e, 0xf2, 0xff, 235), // neon ice-cyan ring
 };
 
@@ -761,6 +765,46 @@ fn windows_dark_mode() -> bool {
         dark
     } else {
         false
+    }
+}
+
+/// User preference cache for the Windows "Animation effects" toggle.
+static REDUCED_CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+const REDUCED_POLL: Duration = Duration::from_secs(5);
+
+/// Does the user want fewer animations? Gates the wizard's logo entrance.
+/// Read from the Windows "Animation effects" toggle
+/// (`SystemDisableAnimations`), with a `NEXTAR_REDUCED_MOTION=1` dev/CI pin.
+/// Missing key → animations on (mirrors nextar-gui).
+fn reduced_motion() -> bool {
+    if let Ok(v) = std::env::var("NEXTAR_REDUCED_MOTION") {
+        return v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on");
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(mut g) = REDUCED_CACHE.lock() {
+            if let Some((at, v)) = *g {
+                if at.elapsed() < REDUCED_POLL {
+                    return v;
+                }
+            }
+            let v = read_reduced_motion();
+            *g = Some((Instant::now(), v));
+            return v;
+        }
+    }
+    false
+}
+
+#[cfg(windows)]
+fn read_reduced_motion() -> bool {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    match hkcu.open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Accessibility") {
+        Ok(k) => k
+            .get_value::<u32, _>("SystemDisableAnimations")
+            .map(|v| v != 0)
+            .unwrap_or(false),
+        Err(_) => false,
     }
 }
 
@@ -844,61 +888,83 @@ fn blend_palettes(a: LogoPalette, b: LogoPalette, t: f32) -> LogoPalette {
         tile_b: blend_color(a.tile_b, b.tile_b, t),
         tile_c: blend_color(a.tile_c, b.tile_c, t),
         tile_mag: blend_color(a.tile_mag, b.tile_mag, t),
-        back_a: blend_color(a.back_a, b.back_a, t),
-        back_b: blend_color(a.back_b, b.back_b, t),
-        front_a: blend_color(a.front_a, b.front_a, t),
-        front_b: blend_color(a.front_b, b.front_b, t),
-        lit: blend_color(a.lit, b.lit, t),
+        layer_a: blend_color(a.layer_a, b.layer_a, t),
+        layer_b: blend_color(a.layer_b, b.layer_b, t),
+        layer_c: blend_color(a.layer_c, b.layer_c, t),
+        core: blend_color(a.core, b.core, t),
+        glow: blend_color(a.glow, b.glow, t),
         bezel: blend_color(a.bezel, b.bezel, t),
     }
 }
 
-/// Draw the brand lockup: glass tile + heavy chrome " >> " fast-forward
-/// chevrons (dim cyan back pair, hero chrome front pair). The tile swaps
-/// between frosted white (light mode) and deep navy (dark mode) to follow
-/// the Windows theme (mirrors nextar-gui's painter).
-fn draw_logo(ui: &mut egui::Ui, size: f32) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
-    let p = ui.painter();
+/// Draw the brand lockup: a circular glass tile with a neon-cyan ring
+/// carrying the convergence core — three nested chevron planes (violet →
+/// indigo → cyan) that fold inward and feed a bright core node. The tile
+/// swaps between frosted white (light mode) and deep navy (dark mode) to
+/// follow the Windows theme (mirrors nextar-gui and the icon generator).
+fn draw_logo_tile(p: &egui::Painter, rect: egui::Rect, fade: f32) {
     let w = rect.width();
-    let h = rect.height();
     let pal = logo_palette();
     let center = rect.center();
     let radius = 0.44 * w; // circle inscribed in the 6%-inset content box
+    p.add(circle_tile_mesh(rect, radius, |t| alpha(tile_grad(t, pal), fade)));
+    p.circle_stroke(center, radius, Stroke::new((0.018 * w).max(1.2), alpha(pal.bezel, fade)));
+}
 
-    // ---- glass tile: a perfect circle filled with the smooth vertical
-    //      gradient via a per-vertex mesh (a per-band `rect_filled` would
-    //      clamp the corner radius and read as square; the mesh keeps the
-    //      circle at every size) ----
-    p.add(circle_tile_mesh(rect, radius, |t| tile_grad(t, pal)));
-    // thin neon cyan ring around the tile edge (matches the lit-chrome
-    // accent), scaling with size so it stays visible on the small tiles
-    p.circle_stroke(center, radius, Stroke::new((0.018 * w).max(1.2), pal.bezel));
+fn draw_logo_at(p: &egui::Painter, rect: egui::Rect, fade: f32) {
+    draw_logo_tile(p, rect, fade);
+    converge_mark(p, rect, logo_palette(), fade, 1.0);
+}
 
-    // ---- chrome fast-forward chevrons: crisp mitered vector polygons
-    //      (geometry mirrors the icon generator — no texture, no glows).
-    //      The chevrons are scaled up to fill the circle: the front tip
-    //      lands at ~68% of the circle radius. ----
-    let ux = |v: f32| rect.left() + (0.06 + 0.88 * v) * w;
-    let uy = |t: f32| rect.top() + (0.06 + 0.88 * t) * h;
-    let back = chevron_hex(
-        egui::pos2(ux(0.0739), uy(0.3466)),
-        egui::pos2(ux(0.0739), uy(0.6534)),
-        egui::pos2(ux(0.3239), uy(0.5)),
-        0.038 * w,
-    );
-    let front = chevron_hex(
-        egui::pos2(ux(0.4830), uy(0.2898)),
-        egui::pos2(ux(0.4830), uy(0.7102)),
-        egui::pos2(ux(0.8352), uy(0.5)),
-        0.075 * w,
-    );
-    let mut mesh = egui::Mesh::default();
-    chrome_hex(&mut mesh, &back, pal.back_a, pal.back_b, 1.0);
-    chrome_hex(&mut mesh, &front, pal.front_a, pal.front_b, 1.0);
-    // subtle cyan lit-chrome edge along the front chevron's upper bars
-    chrome_lit(&mut mesh, &front, 0.02 * w, pal.lit, 1.0);
-    p.add(mesh);
+/// The wizard's boot moment (mirrors nextar-gui's hero logo): a one-shot
+/// fade + zoom entrance, converging data fragments, the planes folding in,
+/// an energy pulse and a cyan → violet light sweep. Skips to a static logo
+/// when the user has reduced motion enabled (Windows "Animation effects").
+fn draw_logo_boot(ui: &mut egui::Ui, size: f32, born: Instant) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+    let p = ui.painter();
+    if reduced_motion() {
+        draw_logo_at(p, rect, 1.0);
+        return;
+    }
+    let t = born.elapsed().as_secs_f32();
+    let enter = smoothstep(t / 0.35, 0.0, 1.0);
+    let scale = 0.96 + 0.04 * enter;
+    let r = egui::Rect::from_center_size(rect.center(), Vec2::splat(size * scale));
+    p.circle_filled(rect.center(), rect.width() * 0.58, alpha(neon_cyan(), 0.04));
+    p.circle_filled(rect.center(), rect.width() * 0.5, alpha(accent2(), 0.05));
+    let pal = logo_palette();
+    draw_converging_particles(p, r, t, pal);
+    let build = smoothstep((t - 0.25) / 0.45, 0.0, 1.0);
+    draw_logo_tile(p, r, enter);
+    converge_mark(p, r, pal, enter, build);
+    // energy pulse: a ring expands from the core (0.75–1.0 s)
+    let pulse_t = ((t - 0.75) / 0.25).clamp(0.0, 1.0);
+    if pulse_t > 0.0 && pulse_t < 1.0 {
+        let e = smoothstep(pulse_t, 0.0, 1.0);
+        let core = egui::pos2(
+            r.left() + (0.06 + 0.88 * CORE.0) * r.width(),
+            r.top() + (0.06 + 0.88 * CORE.1) * r.height(),
+        );
+        p.circle_stroke(core, lerpf(0.06, 0.46, e) * r.width(), Stroke::new(1.4, alpha(neon_cyan(), (1.0 - e) * 0.6)));
+    }
+    // cyan → violet light sweep across the mark (0.9–1.35 s): a wide,
+    // soft-edged gradient band with a faint cyan echo trailing behind it,
+    // so it reads as light rather than a hard stripe
+    let sweep_t = ((t - 0.9) / 0.45).clamp(0.0, 1.0);
+    if sweep_t > 0.0 && sweep_t < 1.0 {
+        let box_r = egui::Rect::from_min_max(
+            egui::pos2(r.left() + 0.06 * r.width(), r.top() + 0.06 * r.height()),
+            egui::pos2(r.right() - 0.06 * r.width(), r.bottom() - 0.06 * r.height()),
+        );
+        let fade = (sweep_t * (1.0 - sweep_t)) * 4.0;
+        let cx = lerpf(box_r.left() - box_r.width() * 0.4, box_r.right() + box_r.width() * 0.4, sweep_t);
+        let slope = box_r.height() * 0.3;
+        // faint cyan trail behind the main band
+        draw_sweep_band(p, box_r, cx - box_r.width() * 0.13, slope, fade * 0.45, true);
+        // main gradient band
+        draw_sweep_band(p, box_r, cx, slope, fade, false);
+    }
 }
 
 /// A perfect circular tile filled with a smooth vertical gradient,
@@ -965,94 +1031,132 @@ fn tile_grad(t: f32, pal: LogoPalette) -> Color32 {
     )
 }
 
-/// Intersection of the line through `p` along `u` and the line through `q`
-/// along `v` (miter-join math).
-fn line_intersect(p: egui::Pos2, u: egui::Vec2, q: egui::Pos2, v: egui::Vec2) -> egui::Pos2 {
-    let denom = u.x * v.y - u.y * v.x;
-    if denom.abs() < 1e-6 {
-        return p + u * 0.5;
+/// One converging chevron plane: half-reach, top y, apex y, half-width.
+/// Unit coords, y down; planes are drawn outer → inner (violet → cyan).
+const PLANES: [(f32, f32, f32, f32); 3] = [
+    (0.300, 0.240, 0.520, 0.030),
+    (0.215, 0.360, 0.610, 0.028),
+    (0.130, 0.470, 0.680, 0.026),
+];
+
+/// Core node position + radius (unit coords, y down).
+const CORE: (f32, f32, f32) = (0.5, 0.735, 0.050);
+
+/// The convergence-core mark: three nested chevron planes fold inward
+/// (violet → indigo → cyan) and feed a bright core node with a soft glow —
+/// files, folders and data streams compressed into one intelligent point.
+/// Unit coords mirror the icon generator exactly; the tile is the 6%-inset
+/// content box (0.06 + 0.88u). `build` (0..1) staggers the planes outer →
+/// inner so the boot moment looks like layers folding into place.
+fn converge_mark(p: &egui::Painter, rect: egui::Rect, pal: LogoPalette, fade: f32, build: f32) {
+    let w = rect.width();
+    let h = rect.height();
+    let ux = |v: f32| rect.left() + (0.06 + 0.88 * v) * w;
+    let uy = |t: f32| rect.top() + (0.06 + 0.88 * t) * h;
+    let colors = [pal.layer_a, pal.layer_b, pal.layer_c];
+    for (k, (reach, top, apex, hw)) in PLANES.iter().enumerate() {
+        let kf = fade * smoothstep((build - 0.14 * k as f32) / 0.5, 0.0, 1.0);
+        if kf <= 0.002 {
+            continue;
+        }
+        let l = egui::pos2(ux(0.5 - reach), uy(*top));
+        let a = egui::pos2(ux(0.5), uy(*apex));
+        let r = egui::pos2(ux(0.5 + reach), uy(*top));
+        let stroke = Stroke::new((2.0 * hw * 0.88 * w).max(1.0), alpha(colors[k], kf));
+        p.add(egui::Shape::line(vec![l, a, r], stroke));
     }
-    let w = q - p;
-    let t = (w.x * v.y - w.y * v.x) / denom;
-    p + u * t
+    // core node: soft glow halo + bright dot + white inner spark
+    let kf = fade * smoothstep((build - 0.25) / 0.5, 0.0, 1.0);
+    if kf > 0.002 {
+        let core = egui::pos2(ux(CORE.0), uy(CORE.1));
+        let r = CORE.2 * 0.88 * w;
+        p.circle_filled(core, r * 1.7, alpha(pal.glow, 0.30 * kf));
+        p.circle_filled(core, r * 1.35, alpha(pal.glow, 0.40 * kf));
+        p.circle_filled(core, r, alpha(pal.core, kf));
+        p.circle_filled(egui::pos2(core.x, core.y - r * 0.25), r * 0.38, alpha(Color32::WHITE, 0.9 * kf));
+    }
 }
 
-/// One chevron as a mitered hexagon `[am, o, bp, bm, i, ap]` plus the
-/// gradient position at the notch and the bar inward normals (for the lit
-/// edge). Mirrors nextar-gui / the icon generator.
-struct Chevron {
-    hex: [egui::Pos2; 6],
-    t_i: f32,
-    n1: egui::Vec2, // top bar: from its upper edge into the bar
-    n2: egui::Vec2, // bottom bar: from its upper edge into the bar
+/// The boot-moment fragments: scattered digital particles converge into the
+/// core (the "files being compressed" read). `t` is seconds since launch.
+fn draw_converging_particles(p: &egui::Painter, rect: egui::Rect, t: f32, pal: LogoPalette) {
+    let w = rect.width();
+    let h = rect.height();
+    let ux = |v: f32| rect.left() + (0.06 + 0.88 * v) * w;
+    let uy = |v: f32| rect.top() + (0.06 + 0.88 * v) * h;
+    let core = egui::pos2(ux(CORE.0), uy(CORE.1));
+    const FRAG: [(f32, f32); 8] = [
+        (0.16, 0.16), (0.84, 0.16), (0.20, 0.46), (0.80, 0.46),
+        (0.28, 0.74), (0.72, 0.74), (0.42, 0.10), (0.58, 0.10),
+    ];
+    for (i, (fx, fy)) in FRAG.iter().enumerate() {
+        let delay = i as f32 * 0.035;
+        let u = ((t - delay) / 0.30).clamp(0.0, 1.0);
+        if u <= 0.0 || u >= 1.0 {
+            continue;
+        }
+        let e = smoothstep(u, 0.0, 1.0);
+        let start = egui::pos2(ux(*fx), uy(*fy));
+        let pos = egui::pos2(lerpf(start.x, core.x, e), lerpf(start.y, core.y, e));
+        let a = (u * (1.0 - u)) * 4.0;
+        let col = if i % 2 == 0 { pal.layer_c } else { pal.layer_a };
+        p.circle_filled(pos, (0.016 * w).max(1.2), alpha(col, a * 0.9));
+    }
 }
 
-fn chevron_hex(a: egui::Pos2, b: egui::Pos2, t: egui::Pos2, hw: f32) -> Chevron {
-    let d1 = t - a;
-    let d2 = t - b;
-    let l1 = d1.length().max(f32::EPSILON);
-    let l2 = d2.length().max(f32::EPSILON);
-    let u1 = d1 / l1;
-    let u2 = d2 / l2;
-    let n1 = egui::vec2(-u1.y, u1.x);
-    let n2 = egui::vec2(-u2.y, u2.x);
-    let ap = a + n1 * hw; // top bar lower (inner) edge start
-    let am = a - n1 * hw; // top bar upper (outer) edge start
-    let bp = b + n2 * hw; // bottom bar lower (outer) edge start
-    let bm = b - n2 * hw; // bottom bar upper (inner) edge start
-    let o = line_intersect(am, u1, bp, u2); // tip — the two outer edges meet
-    let i = line_intersect(ap, u1, bm, u2); // notch — the two inner edges meet
-    let t_i = ((i - a).dot(u1) / l1).clamp(0.0, 1.0);
-    Chevron { hex: [am, o, bp, bm, i, ap], t_i, n1, n2 }
-}
-
-/// Add one mitered chevron to the mesh: per-vertex gradient along the bars
-/// (steel base → bright tip), fan-triangulated from the notch vertex.
-fn chrome_hex(mesh: &mut egui::Mesh, ch: &Chevron, base: Color32, tip: Color32, fade: f32) {
-    let mid = Color32::from_rgb(
-        lerp8(base.r(), tip.r(), ch.t_i),
-        lerp8(base.g(), tip.g(), ch.t_i),
-        lerp8(base.b(), tip.b(), ch.t_i),
-    );
-    // vertex colors: [am, o, bp, bm, i, ap]
-    let colors = [base, tip, base, base, mid, base];
+/// One quad (4 vertices, fan-triangulated) with per-vertex colors.
+fn quad(mesh: &mut egui::Mesh, pts: [egui::Pos2; 4], colors: [Color32; 4]) {
     let v0 = mesh.vertices.len() as u32;
-    for (i, pt) in ch.hex.iter().enumerate() {
+    for (i, pt) in pts.iter().enumerate() {
         mesh.vertices.push(egui::epaint::Vertex {
             pos: *pt,
             uv: egui::epaint::WHITE_UV,
-            color: alpha(colors[i], fade),
-        });
-    }
-    // fan from the notch (index 4): (i, am, o), (i, o, bp), (i, bp, bm), (i, ap, am)
-    mesh.indices.extend_from_slice(&[
-        v0 + 4, v0, v0 + 1,
-        v0 + 4, v0 + 1, v0 + 2,
-        v0 + 4, v0 + 2, v0 + 3,
-        v0 + 4, v0 + 5, v0,
-    ]);
-}
-
-/// Subtle lit-chrome edge: a thin cyan strip along the front chevron's two
-/// upper bars (mirrors nextar-gui / the icon generator).
-fn chrome_lit(mesh: &mut egui::Mesh, ch: &Chevron, w: f32, lit: Color32, fade: f32) {
-    lit_quad(mesh, ch.hex[0], ch.hex[1], ch.n1, w, lit, fade); // am→o, into the top bar
-    lit_quad(mesh, ch.hex[3], ch.hex[1], ch.n2, w, lit, fade); // bm→o, into the bottom bar
-}
-
-/// One thin quad strip along the segment p0→p1, offset `w` into the bar
-/// along `inward`.
-fn lit_quad(mesh: &mut egui::Mesh, p0: egui::Pos2, p1: egui::Pos2, inward: egui::Vec2, w: f32, lit: Color32, fade: f32) {
-    let n = inward.normalized() * w;
-    let v0 = mesh.vertices.len() as u32;
-    for pos in [p0, p1, p1 + n, p0 + n] {
-        mesh.vertices.push(egui::epaint::Vertex {
-            pos,
-            uv: egui::epaint::WHITE_UV,
-            color: alpha(lit, fade),
+            color: colors[i],
         });
     }
     mesh.indices.extend_from_slice(&[v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3]);
+}
+
+/// A wide, soft-edged light band for the logo sweep. The band is subdivided
+/// into vertical strips with a gaussian alpha falloff across its width so the
+/// edges feather out — reads as light, not a hard stripe. `echo` draws the
+/// faint uniform-cyan trail behind the main band; otherwise it's the
+/// cyan→violet gradient band (cyan on the leading edge, the direction of
+/// travel).
+fn draw_sweep_band(p: &egui::Painter, box_r: egui::Rect, cx: f32, slope: f32, fade: f32, echo: bool) {
+    if fade <= 0.0 {
+        return;
+    }
+    let cyan = neon_cyan();
+    let violet = accent2();
+    let half = box_r.width() * if echo { 0.10 } else { 0.16 };
+    let n = 16usize;
+    let mut sm = egui::Mesh::default();
+    for i in 0..n {
+        let u0 = -1.0 + 2.0 * i as f32 / n as f32;
+        let u1 = -1.0 + 2.0 * (i + 1) as f32 / n as f32;
+        let um = (u0 + u1) * 0.5;
+        let g = (-(um * um) / (2.0 * 0.42 * 0.42)).exp();
+        let col = if echo {
+            cyan
+        } else {
+            blend_color(violet, cyan, 0.5 + 0.5 * um)
+        };
+        let a = (if echo { 0.18 } else { 0.50 }) * g * fade;
+        let x0 = cx + u0 * half;
+        let x1 = cx + u1 * half;
+        quad(
+            &mut sm,
+            [
+                egui::pos2(x0, box_r.top()),
+                egui::pos2(x1, box_r.top()),
+                egui::pos2(x1 + slope, box_r.bottom()),
+                egui::pos2(x0 + slope, box_r.bottom()),
+            ],
+            [alpha(col, a), alpha(col, a), alpha(col, a), alpha(col, a)],
+        );
+    }
+    p.with_clip_rect(box_r).add(sm);
 }
 
 fn grad_text(s: &str, size: f32, strong: bool) -> egui::WidgetText {
@@ -1071,6 +1175,140 @@ fn grad_text(s: &str, size: f32, strong: bool) -> egui::WidgetText {
         );
     }
     job.into()
+}
+
+fn dim(c: Color32, f: f32) -> Color32 {
+    Color32::from_rgb(
+        (c.r() as f32 * f).round() as u8,
+        (c.g() as f32 * f).round() as u8,
+        (c.b() as f32 * f).round() as u8,
+    )
+}
+
+// ---------------------------------------------------------- wizard widgets
+/// Small painted vector icons (mirrors nextar-gui) for the wizard's primary
+/// actions — no emoji, no image assets.
+#[derive(Clone, Copy)]
+enum Icon {
+    Create,
+    ArrowRight,
+    Check,
+    Trash,
+}
+
+fn draw_icon(p: &egui::Painter, rect: egui::Rect, icon: Icon, color: Color32, w: f32) {
+    let s = Stroke::new(w, color);
+    let c = rect.center();
+    match icon {
+        Icon::Create => {
+            p.line_segment([egui::pos2(rect.left() + 2.0, c.y), egui::pos2(rect.right() - 2.0, c.y)], s);
+            p.line_segment([egui::pos2(c.x, rect.top() + 2.0), egui::pos2(c.x, rect.bottom() - 2.0)], s);
+        }
+        Icon::ArrowRight => {
+            p.line_segment([egui::pos2(rect.left() + 1.0, c.y), egui::pos2(rect.right() - 2.0, c.y)], s);
+            p.line_segment([egui::pos2(rect.right() - 5.0, c.y - 3.0), egui::pos2(rect.right() - 2.0, c.y)], s);
+            p.line_segment([egui::pos2(rect.right() - 5.0, c.y + 3.0), egui::pos2(rect.right() - 2.0, c.y)], s);
+        }
+        Icon::Check => {
+            p.line_segment([egui::pos2(rect.left() + 1.0, c.y), egui::pos2(c.x - 1.0, rect.bottom() - 2.0)], s);
+            p.line_segment([egui::pos2(c.x - 1.0, rect.bottom() - 2.0), egui::pos2(rect.right() - 1.0, rect.top() + 2.0)], s);
+        }
+        Icon::Trash => {
+            let top = rect.top() + 1.0;
+            let bot = rect.bottom() - 1.0;
+            // handle + lid
+            p.line_segment([egui::pos2(c.x - 2.0, top + 2.0), egui::pos2(c.x - 2.0, top)], s);
+            p.line_segment([egui::pos2(c.x + 2.0, top + 2.0), egui::pos2(c.x + 2.0, top)], s);
+            p.line_segment([egui::pos2(rect.left() + 2.0, top + 3.5), egui::pos2(rect.right() - 2.0, top + 3.5)], s);
+            // body (trapezoid)
+            let pts = [
+                egui::pos2(rect.left() + 2.0, top + 5.0),
+                egui::pos2(rect.right() - 2.0, top + 5.0),
+                egui::pos2(rect.right() - 3.5, bot),
+                egui::pos2(rect.left() + 3.5, bot),
+            ];
+            p.add(egui::Shape::closed_line(pts.to_vec(), s));
+        }
+    }
+}
+
+/// Primary wizard button (mirrors nextar-gui): gradient pill with a painted
+/// icon, hover glow, press-down physics and a busy state. `danger` swaps the
+/// fill to the error red for the Uninstall action.
+fn action_button(ui: &mut egui::Ui, label: &str, icon: Option<Icon>, size: f32, busy: bool, danger: bool) -> egui::Response {
+    let txt_c = Color32::from_rgb(0x04, 0x12, 0x1a);
+    let icon_s = size * 1.25;
+    let gap = 9.0;
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_string(), egui::FontId::proportional(size), txt_c);
+    let w = galley.size().x + 40.0 + if icon.is_some() { icon_s + gap } else { 0.0 };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, galley.size().y + 20.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        let hovered = resp.hovered() && !busy;
+        let pressed = resp.is_pointer_button_down_on() && !busy;
+        let shift = if pressed { 1.2 } else { 0.0 };
+        let r = rect.translate(Vec2::new(0.0, shift));
+        let corner = CornerRadius::same(255);
+        p.rect_filled(
+            r.translate(Vec2::new(0.0, 2.5 - shift)),
+            corner,
+            Color32::from_rgba_unmultiplied(0, 0, 0, if hovered { 90 } else { 45 }),
+        );
+        if busy {
+            p.rect_filled(r, corner, surface());
+            p.rect_stroke(r, corner, Stroke::new(1.0, border()), egui::StrokeKind::Inside);
+            let pulse = ((ui.input(|i| i.time) * 2.6).sin() * 0.5 + 0.5) as f32;
+            p.circle_filled(egui::pos2(r.left() + 24.0, r.center().y), 4.0, alpha(grad_color(0.2), 0.35 + 0.65 * pulse));
+            p.circle_filled(egui::pos2(r.left() + 24.0, r.center().y), 8.0, alpha(grad_color(0.2), 0.12));
+            p.text(
+                egui::pos2(r.left() + 36.0, r.center().y),
+                egui::Align2::LEFT_CENTER,
+                format!("{label}…"),
+                egui::FontId::proportional(size),
+                text2(),
+            );
+            return resp;
+        }
+        let fill = if danger { err() } else { grad_color(0.14) };
+        let body = if pressed { dim(fill, 0.85) } else { fill };
+        p.rect_filled(r, corner, body);
+        let stroke_c = Color32::from_rgba_unmultiplied(255, 255, 255, if hovered { 115 } else { 55 });
+        p.rect_stroke(r, corner, Stroke::new(1.0, stroke_c), egui::StrokeKind::Inside);
+        if hovered && !pressed {
+            p.rect_filled(r.expand2(Vec2::new(5.0, 5.0)), corner, alpha(neon_cyan(), 0.10));
+        }
+        if resp.has_focus() {
+            p.rect_stroke(r.expand2(Vec2::new(2.0, 2.0)), corner, Stroke::new(1.5, alpha(neon_cyan(), 0.9)), egui::StrokeKind::Inside);
+        }
+        let mut x = r.center().x - (galley.size().x + if icon.is_some() { icon_s + gap } else { 0.0 }) * 0.5;
+        if let Some(ic) = icon {
+            let icon_r = egui::Rect::from_center_size(egui::pos2(x + icon_s * 0.5, r.center().y), Vec2::splat(icon_s));
+            draw_icon(p, icon_r, ic, Color32::from_rgb(0x04, 0x12, 0x1a), 1.8);
+            x += icon_s + gap;
+        }
+        p.text(
+            egui::pos2(x + galley.size().x * 0.5, r.center().y),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(size),
+            if pressed { dim(txt_c, 0.85) } else { txt_c },
+        );
+    }
+    resp
+}
+
+/// Subtle inset top highlight for glass cards (mirrors nextar-gui).
+fn paint_card_top(p: &egui::Painter, rect: egui::Rect, radius: u8, a: f32) {
+    let inset = radius as f32 + 3.0;
+    p.line_segment(
+        [
+            egui::pos2(rect.left() + inset, rect.top() + 1.0),
+            egui::pos2(rect.right() - inset, rect.top() + 1.0),
+        ],
+        Stroke::new(1.0, alpha(Color32::from_rgb(255, 255, 255), 0.07 * a)),
+    );
 }
 
 // ---------------------------------------------------------- titlebar theme
@@ -1157,7 +1395,32 @@ fn colorref(c: Color32) -> u32 {
     u32::from(c.r()) | (u32::from(c.g()) << 8) | (u32::from(c.b()) << 16)
 }
 
+/// Embed Space Grotesk (the marketing site's face) as the proportional
+/// font for regular/semibold/bold, keeping the defaults as fallback.
+fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "sg-regular".into(),
+        egui::FontData::from_static(include_bytes!("../../resources/fonts/SpaceGrotesk-Regular.ttf")).into(),
+    );
+    fonts.font_data.insert(
+        "sg-semibold".into(),
+        egui::FontData::from_static(include_bytes!("../../resources/fonts/SpaceGrotesk-SemiBold.ttf")).into(),
+    );
+    fonts.font_data.insert(
+        "sg-bold".into(),
+        egui::FontData::from_static(include_bytes!("../../resources/fonts/SpaceGrotesk-Bold.ttf")).into(),
+    );
+    if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        list.insert(0, "sg-bold".into());
+        list.insert(1, "sg-semibold".into());
+        list.insert(2, "sg-regular".into());
+    }
+    ctx.set_fonts(fonts);
+}
+
 fn configure_theme(ctx: &egui::Context) {
+    install_fonts(ctx);
     let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
     style.visuals = egui::Visuals::dark();
     style.visuals.panel_fill = bg2();
@@ -1168,6 +1431,7 @@ fn configure_theme(ctx: &egui::Context) {
     style.visuals.selection.bg_fill = accent2();
     style.visuals.selection.stroke = Stroke::new(1.0, neon_cyan());
     style.visuals.hyperlink_color = neon_cyan();
+    style.visuals.window_corner_radius = CornerRadius::same(10);
     for w in [
         &mut style.visuals.widgets.inactive,
         &mut style.visuals.widgets.hovered,
@@ -1176,13 +1440,13 @@ fn configure_theme(ctx: &egui::Context) {
         w.bg_fill = surface();
         w.bg_stroke = Stroke::new(1.0, border());
         w.fg_stroke = Stroke::new(1.0, text2());
-        w.corner_radius = CornerRadius::same(6);
+        w.corner_radius = CornerRadius::same(8);
     }
     style.visuals.widgets.hovered.bg_fill = surface2();
-    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, alpha(neon_cyan(), 0.63));
+    style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, alpha(neon_cyan(), 0.55));
     style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, text());
     style.visuals.widgets.active.bg_fill = active();
-    style.visuals.widgets.active.bg_stroke = Stroke::new(1.5, neon_pink());
+    style.visuals.widgets.active.bg_stroke = Stroke::new(1.5, alpha(neon_cyan(), 0.85));
     style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, text());
     style.visuals.text_cursor = egui::style::TextCursorStyle {
         stroke: Stroke::new(1.0, text2()),
@@ -1193,7 +1457,7 @@ fn configure_theme(ctx: &egui::Context) {
     };
     style.visuals.faint_bg_color = border();
     style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-    style.spacing.button_padding = Vec2::new(12.0, 6.0);
+    style.spacing.button_padding = Vec2::new(16.0, 8.0);
     ctx.set_style_of(egui::Theme::Dark, style);
 }
 
@@ -1231,6 +1495,8 @@ struct Wizard {
     prefix: String,
     opts: InstallOpts,
     launch: bool,
+    /// Timestamp of the window opening — drives the one-shot logo entrance.
+    logo_born: Instant,
     // install/uninstall worker
     rx: Option<Receiver<Result<String>>>,
     logs: Vec<String>,
@@ -1246,6 +1512,7 @@ impl Wizard {
             prefix: default_install_dir().display().to_string(),
             opts: InstallOpts::default(),
             launch: true,
+            logo_born: Instant::now(),
             rx: None,
             logs: Vec::new(),
             done: None,
@@ -1318,12 +1585,24 @@ impl eframe::App for Wizard {
 
         ui.vertical_centered(|ui| {
             ui.add_space(18.0);
-            draw_logo(ui, 72.0);
-            ui.add_space(10.0);
-            ui.label(grad_text("nextar", 26.0, true));
-            ui.label(RichText::new(format!("setup v{VERSION}")).size(12.0).color(text3()));
+            // horizontal lockup: logo left, wordmark + version right — the
+            // same brand pairing as the app's Home hero
+            ui.horizontal(|ui| {
+                draw_logo_boot(ui, 64.0, self.logo_born);
+                ui.add_space(14.0);
+                ui.vertical(|ui| {
+                    ui.add_space(6.0);
+                    ui.label(grad_text("NEXTAR", 24.0, true));
+                    ui.label(RichText::new(format!("setup v{VERSION}")).size(12.0).color(text3()));
+                });
+            });
             ui.add_space(8.0);
         });
+        // keep frames flowing while the one-shot boot logo animation plays,
+        // then go back to repainting only on interaction
+        if self.logo_born.elapsed() < Duration::from_millis(1100) {
+            ctx.request_repaint();
+        }
 
         match self.page {
             Page::Welcome => {
@@ -1333,10 +1612,7 @@ impl eframe::App for Wizard {
                     ui.add_space(6.0);
                     ui.label(RichText::new("zstd + lzma2 compression · Argon2id + XChaCha20-Poly1305 encryption · Reed-Solomon recovery").size(11.5).color(text3()));
                     ui.add_space(22.0);
-                    if ui
-                        .add(egui::Button::new(RichText::new("  Install nextar  ").size(15.0).strong().color(Color32::WHITE)).fill(accent()).corner_radius(CornerRadius::same(10)))
-                        .clicked()
-                    {
+                    if action_button(ui, "Install nextar", Some(Icon::Create), 15.0, false, false).clicked() {
                         self.page = Page::Destination;
                     }
                 });
@@ -1360,12 +1636,10 @@ impl eframe::App for Wizard {
                 ui.label(RichText::new("Per-user install — no administrator needed.").size(11.5).color(text3()));
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
-                    if ui.button("← Back").clicked() {
+                    if ui.button("← Back").on_hover_text("Return to the welcome page").clicked() {
                         self.page = Page::Welcome;
                     }
-                    if ui
-                        .add(egui::Button::new(RichText::new("  Next  ").strong().color(Color32::WHITE)).fill(accent()).corner_radius(CornerRadius::same(10)))
-                        .clicked()
+                    if action_button(ui, "Next", Some(Icon::ArrowRight), 13.0, false, false).clicked()
                         && !self.prefix.trim().is_empty()
                     {
                         self.page = Page::Options;
@@ -1378,7 +1652,7 @@ impl eframe::App for Wizard {
                     ui.label(RichText::new("Installation options").size(15.0).strong());
                     ui.add_space(10.0);
                 });
-                egui::Frame::new()
+                let card = egui::Frame::new()
                     .fill(surface())
                     .stroke(Stroke::new(1.0, border()))
                     .corner_radius(CornerRadius::same(12))
@@ -1389,15 +1663,13 @@ impl eframe::App for Wizard {
                         ui.checkbox(&mut self.opts.start_menu, "Add a Start Menu shortcut");
                         ui.checkbox(&mut self.opts.desktop, "Add a desktop shortcut");
                     });
+                paint_card_top(ui.painter(), card.response.rect, 12, 1.0);
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
-                    if ui.button("← Back").clicked() {
+                    if ui.button("← Back").on_hover_text("Return to the destination folder").clicked() {
                         self.page = Page::Destination;
                     }
-                    if ui
-                        .add(egui::Button::new(RichText::new("  Install  ").strong().color(Color32::WHITE)).fill(accent()).corner_radius(CornerRadius::same(10)))
-                        .clicked()
-                    {
+                    if action_button(ui, "Install", Some(Icon::Create), 13.0, false, false).clicked() {
                         let (tx, rx) = std::sync::mpsc::channel();
                         self.begin(tx);
                         self.rx = Some(rx);
@@ -1425,10 +1697,7 @@ impl eframe::App for Wizard {
                                 ui.add_space(6.0);
                             }
                             ui.vertical_centered(|ui| {
-                                if ui
-                                    .add(egui::Button::new(RichText::new("  Finish  ").strong().color(Color32::WHITE)).fill(accent()).corner_radius(CornerRadius::same(10)))
-                                    .clicked()
-                                {
+                                if action_button(ui, "Finish", Some(Icon::Check), 13.0, false, false).clicked() {
                                     if self.mode == Mode::Install && self.launch {
                                         let gui = PathBuf::from(self.prefix.trim()).join("nextar-gui.exe");
                                         let _ = Command::new(gui).creation_flags(0x0800_0000).spawn();
@@ -1472,13 +1741,10 @@ impl eframe::App for Wizard {
                 });
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.button("Cancel").on_hover_text("Leave nextar installed").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
-                    if ui
-                        .add(egui::Button::new(RichText::new("  Uninstall  ").strong().color(Color32::WHITE)).fill(err()).corner_radius(CornerRadius::same(10)))
-                        .clicked()
-                    {
+                    if action_button(ui, "Uninstall", Some(Icon::Trash), 13.0, false, true).clicked() {
                         let (tx, rx) = std::sync::mpsc::channel();
                         self.begin(tx);
                         self.rx = Some(rx);
@@ -1622,7 +1888,7 @@ mod tests {
         // lerp8 rounds to nearest, so half-sums of odd totals round up.
         let expect = |a: u8, b: u8| ((a as u16 + b as u16 + 1) / 2) as u8;
         assert_eq!(mid.tile_a.r(), expect(LIGHT_PALETTE.tile_a.r(), DARK_PALETTE.tile_a.r()));
-        assert_eq!(mid.front_b.g(), expect(LIGHT_PALETTE.front_b.g(), DARK_PALETTE.front_b.g()));
+        assert_eq!(mid.layer_b.g(), expect(LIGHT_PALETTE.layer_b.g(), DARK_PALETTE.layer_b.g()));
         assert_eq!(mid.bezel.a(), expect(LIGHT_PALETTE.bezel.a(), DARK_PALETTE.bezel.a()));
     }
 
@@ -1649,7 +1915,7 @@ mod tests {
         assert_eq!(colorref(Color32::from_rgb(0xff, 0x00, 0x00)), 0x0000_00ff);
         assert_eq!(colorref(Color32::from_rgb(0x00, 0x00, 0xff)), 0x00ff_0000);
         // the exact chrome caption color dark-mode surface
-        assert_eq!(colorref(UI_DARK.surface), 0x0031_121c);
+        assert_eq!(colorref(UI_DARK.surface), 0x0024_1711);
     }
 
     #[test]

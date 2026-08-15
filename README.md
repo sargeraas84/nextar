@@ -35,6 +35,12 @@ nextar-gui`), sharing the same engine and brand identity:
 * **Repair** — drop a corrupted archive plus its `.nvol` volume and rebuild it.
 * The gradient logo is drawn procedurally (no image assets) and the app icon
   is embedded into both executables at build time.
+* The UI follows a single glass design system: painted vector icons for the
+  nav/actions, gradient primary buttons with loading states, glass cards with
+  hover glow + focus rings, and a Home hub with a centerpiece drop stage,
+  Quick Actions and a persisted Recent Archives row. The hero logo plays a
+  one-shot entrance (fade + zoom, bottom→top reveal, cyan light sweep) and a
+  hover micro-lift — all motion respects the Windows reduced-motion setting.
 
 ## Installer & Explorer integration
 
@@ -51,6 +57,11 @@ walk through:
   Start Menu shortcut, and a desktop shortcut (all on by default except
   desktop).
 * **Install** — live progress, then “Launch nextar-gui” when finished.
+
+The wizard shares the GUI's design system — same palette, Space Grotesk
+fonts, painted vector icons on the primary actions (plus / next / check /
+uninstall), gradient pills with hover glow + focus rings, and a glass
+options card with an inset top highlight.
 
 What it registers:
 
@@ -76,17 +87,17 @@ at `setup/`; rebuild after changing the engine with `cargo build --release
 
 nextar ships with a brand identity:
 
-* A **clean vector chrome mark on glass** — a heavy chrome " >> " double
-  chevron on a rounded glass tile with a smooth gradient and a crisp
-  hairline bezel. The chevrons are **exact mitered vector polygons**
-  (flat-cut bar ends meeting at a true mitered point, like an SVG stroke
-  with `stroke-linejoin="miter"`), each bar filled with one smooth linear
-  gradient (steel base → bright tip). The receding back chevron is muted
-  cyan-tinted steel, the front chevron is hero chrome with a subtle cyan
-  lit-chrome edge along its upper bars. No texture, no noise — pure
-  geometry, so it looks like a proper vector logo at every size. In **light mode** the tile is frosted white with dark
-  steel chrome; in **dark mode** the app swaps to a **deep-navy glass tile
-  with white-hot chrome** automatically, following the Windows apps theme
+* A **clean vector mark on glass** — the **convergence core**: three nested
+  chevron planes that fold inward (electric violet → indigo → cyan) and
+  feed a bright core node with a soft cyan glow, on a rounded glass tile
+  with a smooth gradient and a crisp hairline bezel: files, folders and
+  data streams compressed into one compact, intelligent point. Every
+  element is exact vector geometry (rounded chevron strokes + a circle
+  core), each plane filled with a flat brand color. No texture, no noise —
+  pure geometry, so it looks like a proper vector logo at every size. In
+  **light mode** the tile is frosted white with deeper violet/indigo/cyan
+  planes; in **dark mode** the app swaps to a **deep-navy glass tile with
+  brighter neon planes** automatically, following the Windows apps theme
   (read from `HKCU\...\Themes\Personalize`, polled live while the app
   runs). No text in the icon — text lives in the app — so it stays crisp
   and professional from 16px to 256px. It is embedded into all three
@@ -95,11 +106,15 @@ nextar ships with a brand identity:
   Explorer and the taskbar, and the same theme-aware painter renders it in
   the GUI, the boot splash, the shell progress window, and the installer
   wizard.
-* A **synthwave retro GUI** — deep-purple CRT-styled surfaces with neon
-  cyan/hot-pink accents, a subtle scanline + grid overlay, segmented LED
-  progress bars, and tactile neon keycap buttons. The whole UI follows the
+* A **modern glass UI** — near-black glass surfaces with hairline borders
+  and ice-cyan / violet / pink accents, **Space Grotesk** typography (the
+  same face as the marketing site, embedded in both executables),
+  smooth gradient progress bars with a pulsing head, pill buttons with a
+  cyan primary variant, and a pill sidebar — no scanlines, no CRT
+  texture. The whole UI follows the
   Windows light/dark theme: in light mode the surfaces flip to
-  lavender-white with darker neon accents (same eased 450 ms cross-fade as
+  cool silver-white glass with deeper accents (same eased 450 ms
+  cross-fade as
   the logo tile, in both the GUI and the installer wizard). A **Settings
   view** (⚙ in the sidebar) lets you pin the appearance — Follow Windows /
   Always dark / Always light — independent of the OS, with a live logo
@@ -114,13 +129,17 @@ nextar ships with a brand identity:
   Win11), so even the OS chrome cross-fades with the theme, and every
   window gets rounded corners (Win11; square corners on Win10). The logo
   tile is a perfect circle in both the icon and the in-app painter, with
-  the chrome chevrons scaled to fill it (the front tip lands ~2/3 of the
-  way to the rim; the tile gradient is a per-vertex mesh so the circle
-  stays clean at every size) and a thin neon-cyan ring around the edge,
-  matching the lit-chrome accent on both tiles. It boots with an
-  animated splash (chrome " >> " mark over a neon sun, CRT sweep, boot bar)
-  that fades into the app, and it is context-aware: dropping a folder routes
-  to the Create view, dropping a `.next` archive routes to Inspect with a
+  the convergence core scaled to fill it (the innermost plane's apex feeds
+  the core ~3/4 of the way down; the tile gradient is a per-vertex mesh
+  so the circle stays clean at every size) and a thin neon-cyan ring
+  around the edge, matching the lit-chrome accent on both tiles. It boots
+  with an animated splash: scattered digital particles converge into the
+  core, the three planes fold in outer → inner, an energy pulse expands
+  from the core and a cyan → violet light sweep crosses the mark, over a
+  breathing glass halo with an orbiting accent dot and a gradient boot
+  bar, then fades into the app (all motion is skipped under Windows
+  "reduced motion"). It is context-aware: dropping a folder routes to the
+  Create view, dropping a `.next` archive routes to Inspect with a
   one-click "Extract here" banner.
 * **Colored terminal output** — truecolor status lines, success/error
   indicators, progress bars, and per-letter gradient headers. Color is
@@ -226,6 +245,7 @@ nextar/
 │   ├── windows/             # build.ps1 + docs for the Windows installer
 │   └── macos/               # Info.plist, make-app-bundle.sh, build-dmg.sh → .dmg
 ├── scripts/                 # generate-icon.js, build-icns.js, package.sh
+├── site/                    # product landing page (site/index.html, self-contained)
 ├── resources/               # nextar.ico/.png/.icns (light + dark variants)
 ├── docs/                    # ARCHITECTURE.md, FORMAT.md
 ├── dist/                    # built artifacts + installers output
@@ -238,6 +258,30 @@ with Explorer right-click integration. macOS: run
 `installers/macos/build-dmg.sh` **on a Mac** to produce
 `dist/nextar-<version>-macos.dmg` (`.app` bundle + CLI, ad-hoc signed; see
 `installers/macos/README.md` for notarization steps).
+
+**Nightly builds** — `.github/workflows/nightly.yml` builds both platforms
+on every push to `master` (tests before shipping) and publishes them to a
+GitHub Release tagged `nightly` with **fixed asset names**, so the landing
+page (`site/index.html`) can link the latest build with stable URLs:
+
+```
+https://github.com/<owner>/<repo>/releases/download/nightly/nextar-setup.exe
+https://github.com/<owner>/<repo>/releases/download/nightly/nextar-macos.dmg
+```
+
+The tag/release is updated in place on each run (`overwrite: true`); the
+site's download buttons resolve to these URLs automatically — the repo is
+derived from the page URL when hosted on GitHub Pages, otherwise from the
+`REPO` constant in the page script. Each download card also shows a
+**live badge** that reads the nightly release at load time (short commit
+SHA, asset size, age) via the GitHub API, with a graceful offline
+fallback. The release body carries the **commit subject, test results and
+SHA-256 checksums** for both artifacts, and hovering the badge shows the
+commit subject plus the matching checksum. Each download card also has a
+**SHA-256 verification block** — the full checksum with a copy button and
+the platform's verify command (`Get-FileHash` on Windows, `shasum` on
+macOS) — populated from the same release data. Versioned builds ship
+separately via the `release` workflow (tag `v*` or manual dispatch).
 
 See **`docs/FORMAT.md`** for the complete binary layout of the `.NEXT`
 archive and `.nvol` volume, and **`docs/ARCHITECTURE.md`** for the module
