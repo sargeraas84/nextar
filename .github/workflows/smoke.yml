@@ -23,9 +23,11 @@ on:
 
 permissions:
   # contents: write so the report job can append the daily smoke results to
-  # the nightly release body (the release-comments REST API was removed by
-  # GitHub, so the body is the channel visible on the release page).
+  # the nightly release body; issues: write so it can also post a dated entry
+  # to the dedicated "Daily smoke log" issue (the release-comments REST API
+  # was removed by GitHub, so issues + body are the available channels).
   contents: write
+  issues: write
 
 jobs:
   # macOS first: cheap (~2 min) and gates the Windows job below.
@@ -154,39 +156,55 @@ jobs:
           exit $code
 
   # Always runs (even when a job failed/skipped) and records the per-job
-  # results on the nightly release, so a failed daily smoke is visible on the
-  # release page instead of only in the Actions tab.
-  #
-  # Channel: the release BODY, not a release comment. GitHub removed the
-  # release-comments REST API (all /releases/{id}/comments endpoints return
-  # 404), so the body is the only release-page surface we can write. We
-  # replace any previous "Daily smoke" section (the nightly workflow rewrites
-  # the body each build, and the site's badge parser reads the commit + sha
-  # lines above, so an appended section is safe).
+  # results in two places:
+  #   1. the nightly release BODY (visible on the release page), and
+  #   2. a dedicated "Daily smoke log" issue - the canonical, append-only
+  #      history that survives the nightly workflow rewriting the body each
+  #      build. (GitHub removed the release-comments REST API - every
+  #      /releases/{id}/comments endpoint returns 404 - so issues are the
+  #      appendable channel; the site's badge parser reads the commit + sha
+  #      lines above the body's smoke section, so appending there is safe.)
   report:
     runs-on: ubuntu-latest
     needs: [macos-dmg, nightly-shell]
     if: always()
     steps:
-      - name: Write smoke results into the nightly release body
+      - name: Record smoke results (release body + daily log issue)
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.id')
-          COMMIT=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.body' | grep -m1 '^- commit:' | awk '{print $3}')
+          REPO="${{ github.repository }}"
+          RELEASE_ID=$(gh api "repos/$REPO/releases/tags/nightly" --jq '.id')
+          COMMIT=$(gh api "repos/$REPO/releases/tags/nightly" --jq '.body' | grep -m1 '^- commit:' | awk '{print $3}')
           MAC=${{ needs.macos-dmg.result }}
           WIN=${{ needs.nightly-shell.result }}
           MAC_SUMMARY="${{ needs.macos-dmg.outputs.summary }}"
           DEEP_SUMMARY="${{ needs.nightly-shell.outputs.deep }}"
           icon() { case "$1" in success) echo '✅';; failure) echo '❌';; *) echo '⚠️ skipped';; esac; }
-          SMOKE="## Daily smoke results\n\n- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- asset commit: \`${COMMIT}\`\n- macOS dmg E2E: $(icon "$MAC") \`$MAC_SUMMARY\`\n- Windows shell E2E: $(icon "$WIN") \`$DEEP_SUMMARY\`\n"
-          # Keep the nightly's original body, dropping any earlier smoke section.
-          ORIG=$(gh api "repos/${{ github.repository }}/releases/$RELEASE_ID" --jq '.body')
+          DAY=$(date -u +%F)
+          SMOKE="## Daily smoke results ($DAY)\n\n- run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n- asset commit: \`${COMMIT}\`\n- macOS dmg E2E: $(icon "$MAC") \`$MAC_SUMMARY\`\n- Windows shell E2E: $(icon "$WIN") \`$DEEP_SUMMARY\`\n"
+
+          # 1) Release body: keep the nightly's original body, dropping any
+          #    earlier smoke section (so it reflects today only).
+          ORIG=$(gh api "repos/$REPO/releases/$RELEASE_ID" --jq '.body')
           BASE=$(printf '%s' "$ORIG" | sed '/^## Daily smoke results/,$d' | sed -e :a -e '/^\n*$/{$d;N;};/\n$/ba')
           printf '%s\n\n%s' "$BASE" "$(printf '%b' "$SMOKE")" > /tmp/nightly-body.md
-          echo "--- new body ---"
+          echo "--- new release body ---"
           cat /tmp/nightly-body.md
-          gh api --method PATCH "repos/${{ github.repository }}/releases/$RELEASE_ID" -f body="$(cat /tmp/nightly-body.md)" --jq '.body' >/dev/null
+          gh api --method PATCH "repos/$REPO/releases/$RELEASE_ID" -f body="$(cat /tmp/nightly-body.md)" --jq '.id' >/dev/null
           echo "body updated on release $RELEASE_ID"
+
+          # 2) Daily log issue: find the canonical issue by exact title, create
+          #    it on first run, then append a dated comment per run so the full
+          #    history is preserved even after the body is rewritten nightly.
+          #    (Search API is slow/unreliable here; listing open issues and
+          #    filtering by title in jq is fast and deterministic.)
+          ISSUE=$(gh api "repos/$REPO/issues?state=open&per_page=100" --jq '[.[] | select(.title == "Daily smoke log")][0].number // empty')
+          if [ -z "$ISSUE" ]; then
+            ISSUE=$(gh api --method POST "repos/$REPO/issues" -f title="Daily smoke log" -f body="Canonical, append-only log of the daily scheduled smoke runs against the nightly release. Each run appends a dated entry below." --jq '.number')
+            echo "created daily log issue #$ISSUE"
+          fi
+          gh api --method POST "repos/$REPO/issues/$ISSUE/comments" -f body="$(printf '%b' "$SMOKE")" --jq '.html_url'
+          echo "logged to issue #$ISSUE"
