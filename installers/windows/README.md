@@ -4,8 +4,12 @@ A professional per-user installer wizard (`nextar-setup.exe`) built from the
 `setup/` crate. Double-clicking it runs:
 
 ```
-Welcome → Destination folder (Browse…) → Options → Install → Finished
+Welcome → License → Destination folder (Browse…) → Options → Install → Finished
 ```
+
+The finished screen offers **Launch nextar-gui** and **Open installation
+folder**; the install can be cancelled mid-flight, and the payload is
+size-verified before the wizard reports success.
 
 ## What it installs
 
@@ -21,6 +25,15 @@ Welcome → Destination folder (Browse…) → Options → Install → Finished
 - A proper **Uninstall** entry (Settings → Apps), plus optional Start-Menu
   and desktop shortcuts (the SendTo entry is removed on uninstall).
 - A GUI uninstaller (`nextar-setup.exe --uninstall`).
+
+## Upgrades
+
+Re-running `nextar-setup.exe` over an existing install is an **in-place
+upgrade**: the wizard detects the installed version (from the per-user
+Uninstall key) and relabels its buttons **Upgrade nextar** / **Upgrade**,
+overwriting the three binaries and re-applying shortcuts and shell
+integration (fixed `.lnk` paths, so no duplicates). Your `settings.json` and
+any user archives are left untouched.
 
 ## Build
 
@@ -41,6 +54,38 @@ cargo build --release --manifest-path setup/Cargo.toml        # the wizard
 The wizard **embeds** the two release binaries (`include_bytes!` in
 `setup/src/main.rs`), so rebuild them *before* the setup crate. `dist/`
 then contains all three exes — run `dist/nextar-setup.exe` to install.
+
+## Code signing
+
+`build.ps1` signs the three `dist/` exes when a certificate is configured
+(best effort — signing is skipped otherwise, and an unsigned installer still
+works):
+
+```powershell
+$env:NEXTAR_SIGN_CERTFILE = 'C:\certs\nextar.pfx'
+$env:NEXTAR_SIGN_PASSWORD = '…'
+powershell -ExecutionPolicy Bypass -File installers/windows/build.ps1
+```
+
+`signtool.exe` (Windows SDK) signs with SHA-256 plus an RFC-3161 timestamp.
+For CI, set the same two variables as encrypted secrets and run `build.ps1`
+(or a dedicated `signtool` step) before publishing the artifacts.
+
+## MSI (.msi)
+
+The `.exe` wizard is the shipped installer: it is fully per-user (no admin,
+no elevation), self-updating in place, and owns its own uninstaller. An
+`.msi` package is not produced today — Windows Installer is machine-wide by
+default and would need WiX or a comparable authoring tool (an extra
+dependency) plus admin elevation, which nextar deliberately avoids. If a
+`.msi` is ever required for enterprise deployment, wrap the same payload
+with WiX's `perUser` scope; the install actions in `setup/src/main.rs`
+remain the single source of truth.
+
+## Before shipping
+
+Replace the sample end-user license text (`LICENSE_TEXT` in
+`setup/src/main.rs`) with your real terms before publishing a release.
 
 ## Automation flags
 

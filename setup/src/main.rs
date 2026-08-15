@@ -2,8 +2,8 @@
 //!
 //! Double-clicking launches a GUI wizard:
 //!
-//!   Welcome → Destination folder (with Browse…) → Options → Install →
-//!   Finished (with a "Launch nextar-gui" checkbox)
+//!   Welcome → License → Destination folder (with Browse…) → Options →
+//!   Install → Finished (Launch checkbox + open-install-folder)
 //!
 //! It embeds the release `nextar.exe` + `nextar-gui.exe`, copies them into
 //! the chosen folder (default `%LOCALAPPDATA%\nextar`, no admin needed), and
@@ -25,8 +25,9 @@
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -38,6 +39,89 @@ use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, Vec2};
 const VERSION: &str = "0.1.0";
 const NEXAR_EXE: &[u8] = include_bytes!("../../target/release/nextar.exe");
 const GUI_EXE: &[u8] = include_bytes!("../../target/release/nextar-gui.exe");
+
+/// End-user license agreement shown on the License page.
+const LICENSE_TEXT: &str = "\
+NEXTAR END-USER LICENSE AGREEMENT
+
+Version 1.0 — August 15, 2026
+
+This End-User License Agreement (\"Agreement\") is a legal agreement between
+you (an individual or a single entity) and the nextar project (\"nextar\",
+\"we\", or \"us\") governing your use of the nextar software, including its
+installer, documentation, and accompanying components (the \"Software\").
+By installing, copying, or otherwise using the Software, you agree to be
+bound by this Agreement. If you do not agree, do not install or use the
+Software.
+
+1. License Grant.
+Subject to your compliance with this Agreement, nextar grants you a
+personal, non-exclusive, non-transferable, revocable, limited license to
+install and use the Software on your own devices for personal or commercial
+purposes. You may make a reasonable number of backup copies for archival
+purposes only.
+
+2. Ownership.
+The Software, including its code, user interface, logos, trademarks, and
+documentation, is owned by nextar and protected by copyright and other
+intellectual property laws. This Agreement grants a license to use the
+Software; it does not transfer ownership.
+
+3. Open-Source Components.
+The Software incorporates compression, cryptography, and error-correction
+libraries distributed under open-source licenses. Those components remain
+governed by their respective licenses. Nothing in this Agreement limits
+your rights under those licenses.
+
+4. Restrictions.
+You may not (a) sell, rent, lease, sublicense, or commercially redistribute
+the Software; (b) reverse engineer, decompile, or disassemble the Software,
+except as permitted by applicable law; (c) remove or alter any proprietary
+notices; or (d) use the Software to process data in violation of applicable
+law.
+
+5. Your Data.
+The Software processes files only on the devices you choose, and only for
+the compression, encryption, extraction, and repair operations you
+initiate. It does not upload, transmit, or share your files or passwords
+with nextar or any third party. You are responsible for the files you
+process, for safeguarding your passwords, and for keeping backups of
+important data.
+
+6. Updates.
+nextar may provide updates or upgrades, which may replace earlier versions
+while preserving your stored preferences. This Agreement applies to all
+updates and upgrades unless they are accompanied by separate terms.
+
+7. No Warranty.
+THE SOFTWARE IS PROVIDED \"AS IS\" AND \"AS AVAILABLE\", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. NEXTAR DOES NOT
+WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE, UNINTERRUPTED, OR THAT
+COMPRESSED OR REPAIRED DATA WILL BE FREE FROM LOSS OR CORRUPTION.
+
+8. Limitation of Liability.
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, NEXTAR SHALL NOT BE LIABLE FOR ANY
+INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR EXEMPLARY DAMAGES,
+INCLUDING LOSS OF DATA, LOSS OF PROFITS, OR BUSINESS INTERRUPTION, ARISING
+OUT OF OR RELATED TO THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES. NEXTAR'S TOTAL LIABILITY SHALL NOT EXCEED THE AMOUNT YOU PAID
+FOR THE SOFTWARE, IF ANY.
+
+9. Termination.
+This license continues until terminated. It terminates automatically if you
+breach any term of this Agreement. You may terminate it at any time by
+uninstalling the Software and deleting all copies. Sections 2, 5, 7, 8, and
+10 survive termination.
+
+10. Governing Law.
+This Agreement is governed by the laws of the jurisdiction in which
+nextar's licensor is established, without regard to conflict-of-law
+principles. Any dispute shall be resolved in the competent courts of that
+jurisdiction.
+
+By installing or using the Software, you confirm that you have read,
+understood, and agree to be bound by this Agreement.";
 
 // Registry roots.
 const CLASSES: &str = "Software\\Classes";
@@ -234,10 +318,15 @@ fn create_lnk(lnk: &Path, target: &Path, icon: &Path, args: &str) -> Result<()> 
     Ok(())
 }
 
-/// Execute an action list (or print it with `--dry-run`).
-fn run(actions: &[Act], dry: bool) -> Result<()> {
+/// Execute an action list (or print it with `--dry-run`). `cancel` lets the
+/// GUI stop the worker between actions; a `Cancelled`-style short circuit
+/// keeps a partial install from looking like a full one.
+fn run(actions: &[Act], dry: bool, cancel: &AtomicBool) -> Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     for a in actions {
+        if cancel.load(Ordering::Relaxed) {
+            bail!("cancelled by user");
+        }
         if dry {
             println!("  {}", act_short(a));
             continue;
@@ -304,6 +393,36 @@ fn default_install_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("nextar")
+}
+
+/// Read the installed nextar version from the per-user Uninstall key (if
+/// any), so the wizard can offer an in-place upgrade instead of a fresh
+/// install. Settings and user archives are untouched by upgrades.
+fn detect_existing_version() -> Option<String> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    hkcu.open_subkey(format!("{UNINSTALL}\\nextar"))
+        .ok()
+        .and_then(|k| k.get_value::<String, _>("DisplayVersion").ok())
+}
+
+/// Open a folder in Explorer (best effort).
+fn open_folder(dir: &Path) {
+    let _ = Command::new("explorer.exe").arg(dir).creation_flags(0x0800_0000).spawn();
+}
+
+/// Verify the payload landed intact (exact byte size) before reporting a
+/// successful install, so a truncated copy never looks like a good install.
+fn validate_install(prefix: &Path) -> Result<()> {
+    for (name, expected) in [("nextar.exe", NEXAR_EXE.len()), ("nextar-gui.exe", GUI_EXE.len())] {
+        let p = prefix.join(name);
+        let got = std::fs::metadata(&p)
+            .with_context(|| format!("verifying {}", p.display()))?
+            .len() as usize;
+        if got != expected {
+            bail!("verification failed for {name}: expected {expected} bytes, found {got}");
+        }
+    }
+    Ok(())
 }
 
 fn arg_value(args: &[String], name: &str) -> Option<String> {
@@ -481,8 +600,9 @@ fn install(prefix: &Path, dry: bool, quiet: bool) -> Result<()> {
     if dry {
         println!("  (dry run — nothing will be changed)");
     }
-    run(&acts, dry)?;
+    run(&acts, dry, &AtomicBool::new(false))?;
     if !dry {
+        validate_install(prefix)?;
         notify_shell();
     }
     if !dry {
@@ -568,7 +688,7 @@ fn uninstall(prefix: &Path, dry: bool, quiet: bool) -> Result<()> {
     if dry {
         println!("  (dry run — nothing will be changed)");
     }
-    run(&acts, dry)?;
+    run(&acts, dry, &AtomicBool::new(false))?;
 
     if !dry {
         notify_shell();
@@ -1477,6 +1597,7 @@ fn human(n: u64) -> String {
 
 enum Page {
     Welcome,
+    License,
     Destination,
     Options,
     Installing,
@@ -1495,6 +1616,12 @@ struct Wizard {
     prefix: String,
     opts: InstallOpts,
     launch: bool,
+    /// License page gate: the user must tick the box to proceed.
+    agree: bool,
+    /// Version already installed (read from the Uninstall key), if any.
+    existing: Option<String>,
+    /// Set by the Cancel button while the worker runs.
+    cancel: Arc<AtomicBool>,
     /// Timestamp of the window opening — drives the one-shot logo entrance.
     logo_born: Instant,
     // install/uninstall worker
@@ -1506,12 +1633,27 @@ struct Wizard {
 
 impl Wizard {
     fn new(mode: Mode) -> Self {
+        // The uninstaller is launched from Settings → Apps via
+        // "<install>\nextar-setup.exe" --uninstall, so self-locate from the
+        // running exe when no explicit folder was picked (handles custom
+        // install locations). Install mode starts at the default folder.
+        let prefix = if mode == Mode::Uninstall {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(Path::to_path_buf))
+                .unwrap_or_else(default_install_dir)
+        } else {
+            default_install_dir()
+        };
         Self {
             mode,
             page: Page::Welcome,
-            prefix: default_install_dir().display().to_string(),
+            prefix: prefix.display().to_string(),
             opts: InstallOpts::default(),
             launch: true,
+            agree: false,
+            existing: if mode == Mode::Install { detect_existing_version() } else { None },
+            cancel: Arc::new(AtomicBool::new(false)),
             logo_born: Instant::now(),
             rx: None,
             logs: Vec::new(),
@@ -1524,6 +1666,8 @@ impl Wizard {
         let prefix = PathBuf::from(self.prefix.trim());
         let opts = self.opts;
         let mode = self.mode;
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.cancel = cancel.clone();
         self.done = None;
         self.logs.clear();
         std::thread::spawn(move || {
@@ -1531,7 +1675,8 @@ impl Wizard {
                 match mode {
                     Mode::Install => {
                         let acts = install_actions(&prefix, &opts)?;
-                        run(&acts, false)?;
+                        run(&acts, false, &cancel)?;
+                        validate_install(&prefix)?;
                         Ok(format!(
                             "nextar installed in {}\n\n{} files · {}",
                             prefix.display(),
@@ -1541,7 +1686,7 @@ impl Wizard {
                     }
                     Mode::Uninstall => {
                         let acts = uninstall_actions(&prefix);
-                        run(&acts, false)?;
+                        run(&acts, false, &cancel)?;
                         Ok("nextar has been uninstalled.".to_string())
                     }
                 }
@@ -1611,8 +1756,42 @@ impl eframe::App for Wizard {
                     ui.label(RichText::new("A next-generation archiver: fast · secure · self-healing").size(14.0).color(text2()));
                     ui.add_space(6.0);
                     ui.label(RichText::new("zstd + lzma2 compression · Argon2id + XChaCha20-Poly1305 encryption · Reed-Solomon recovery").size(11.5).color(text3()));
+                    if let Some(prev) = &self.existing {
+                        ui.add_space(14.0);
+                        ui.label(
+                            RichText::new(format!("nextar {prev} is already installed — this will upgrade to v{VERSION}, keeping your settings."))
+                                .size(11.5)
+                                .color(accent()),
+                        );
+                    }
                     ui.add_space(22.0);
-                    if action_button(ui, "Install nextar", Some(Icon::Create), 15.0, false, false).clicked() {
+                    let label = if self.existing.is_some() { "Upgrade nextar" } else { "Install nextar" };
+                    if action_button(ui, label, Some(Icon::Create), 15.0, false, false).clicked() {
+                        self.page = Page::License;
+                    }
+                });
+            }
+            Page::License => {
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(RichText::new("License agreement").size(15.0).strong());
+                    ui.add_space(8.0);
+                });
+                egui::ScrollArea::vertical().max_height(210.0).show(ui, |ui| {
+                    ui.label(RichText::new(LICENSE_TEXT).size(11.5).color(text2()));
+                });
+                ui.add_space(10.0);
+                ui.checkbox(&mut self.agree, "I accept the terms of the license agreement");
+                if !self.agree {
+                    ui.add_space(2.0);
+                    ui.label(RichText::new("Accept the terms to continue.").size(11.0).color(text3()));
+                }
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("← Back").on_hover_text("Return to the welcome page").clicked() {
+                        self.page = Page::Welcome;
+                    }
+                    if action_button(ui, "Next", Some(Icon::ArrowRight), 13.0, false, false).clicked() && self.agree {
                         self.page = Page::Destination;
                     }
                 });
@@ -1636,8 +1815,8 @@ impl eframe::App for Wizard {
                 ui.label(RichText::new("Per-user install — no administrator needed.").size(11.5).color(text3()));
                 ui.add_space(14.0);
                 ui.horizontal(|ui| {
-                    if ui.button("← Back").on_hover_text("Return to the welcome page").clicked() {
-                        self.page = Page::Welcome;
+                    if ui.button("← Back").on_hover_text("Return to the license agreement").clicked() {
+                        self.page = Page::License;
                     }
                     if action_button(ui, "Next", Some(Icon::ArrowRight), 13.0, false, false).clicked()
                         && !self.prefix.trim().is_empty()
@@ -1669,7 +1848,8 @@ impl eframe::App for Wizard {
                     if ui.button("← Back").on_hover_text("Return to the destination folder").clicked() {
                         self.page = Page::Destination;
                     }
-                    if action_button(ui, "Install", Some(Icon::Create), 13.0, false, false).clicked() {
+                    let install_label = if self.existing.is_some() { "Upgrade" } else { "Install" };
+                    if action_button(ui, install_label, Some(Icon::Create), 13.0, false, false).clicked() {
                         let (tx, rx) = std::sync::mpsc::channel();
                         self.begin(tx);
                         self.rx = Some(rx);
@@ -1697,18 +1877,34 @@ impl eframe::App for Wizard {
                                 ui.add_space(6.0);
                             }
                             ui.vertical_centered(|ui| {
-                                if action_button(ui, "Finish", Some(Icon::Check), 13.0, false, false).clicked() {
-                                    if self.mode == Mode::Install && self.launch {
-                                        let gui = PathBuf::from(self.prefix.trim()).join("nextar-gui.exe");
-                                        let _ = Command::new(gui).creation_flags(0x0800_0000).spawn();
+                                ui.horizontal(|ui| {
+                                    if self.mode == Mode::Install
+                                        && ui.button("Open installation folder")
+                                            .on_hover_text("Open the folder in Explorer")
+                                            .clicked()
+                                    {
+                                        open_folder(Path::new(self.prefix.trim()));
                                     }
-                                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                                }
+                                    if action_button(ui, "Finish", Some(Icon::Check), 13.0, false, false).clicked() {
+                                        if self.mode == Mode::Install && self.launch {
+                                            let gui = PathBuf::from(self.prefix.trim()).join("nextar-gui.exe");
+                                            let _ = Command::new(gui).creation_flags(0x0800_0000).spawn();
+                                        }
+                                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                    }
+                                });
                             });
                         }
                         Err(e) => {
+                            let cancelled = self.cancel.load(Ordering::Relaxed);
                             ui.vertical_centered(|ui| {
-                                ui.label(RichText::new(format!("❌  {e:#}")).color(err()).size(13.0));
+                                if cancelled {
+                                    ui.label(RichText::new("Installation cancelled.").size(13.0).strong().color(text2()));
+                                    ui.add_space(4.0);
+                                    ui.label(RichText::new("Run the installer again to complete it.").size(11.5).color(text3()));
+                                } else {
+                                    ui.label(RichText::new(format!("❌  {e:#}")).color(err()).size(13.0));
+                                }
                                 ui.add_space(8.0);
                                 if ui.button("Close").clicked() {
                                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1726,6 +1922,14 @@ impl eframe::App for Wizard {
                         ui.add_space(4.0);
                         ui.label(RichText::new("Copying files · registering Explorer integration…").size(11.5).color(text3()));
                     });
+                    if self.mode == Mode::Install {
+                        ui.add_space(12.0);
+                        ui.vertical_centered(|ui| {
+                            if ui.button("Cancel").on_hover_text("Stop the installation").clicked() {
+                                self.cancel.store(true, Ordering::Relaxed);
+                            }
+                        });
+                    }
                     ctx.request_repaint();
                 }
             }
