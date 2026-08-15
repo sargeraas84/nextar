@@ -46,9 +46,10 @@ serde_json = "1"
 walkdir = "2"
 eframe = "0.36.1"
 rfd = "0.17.2"
-winreg = "0.52"                 # Windows theme detection (light/dark logo tile)
 
 [target.'cfg(windows)'.dependencies]
+# Windows-only integrations (theme detection, registry, native window chrome).
+winreg = "0.52"
 # Native window chrome: title bar follows the app palette via DWM attributes.
 raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_LibraryLoader", "Win32_System_Com", "Win32_UI_Shell"] }
