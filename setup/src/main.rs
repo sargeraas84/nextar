@@ -288,8 +288,12 @@ fn reg_key(hkcu: &RegKey, root: &Root, path: &str, write: bool) -> Result<RegKey
         Root::Classes => CLASSES,
         Root::Uninstall => UNINSTALL,
     };
-    let base = hkcu
-        .open_subkey_with_flags(base_path, KEY_READ | if write { KEY_WRITE } else { 0 })
+    // The base key may not exist on a fresh profile (CI runners often lack
+    // HKCU\...\Uninstall), so create it (RegCreateKeyEx also creates any
+    // missing parents) instead of failing the whole install.
+    let flags = KEY_READ | if write { KEY_WRITE } else { 0 };
+    let (base, _) = hkcu
+        .create_subkey_with_flags(base_path, flags)
         .with_context(|| format!("opening {base_path}"))?;
     if write {
         let (key, _) = base
@@ -348,14 +352,15 @@ fn run(actions: &[Act], dry: bool, cancel: &AtomicBool) -> Result<()> {
                 key.set_value(name, value)?;
             }
             Act::Delete { root, path } => {
+                // Tolerate an already-missing base key: uninstall should not
+                // fail when the registry entries are already gone.
                 let base_path = match root {
                     Root::Classes => CLASSES,
                     Root::Uninstall => UNINSTALL,
                 };
-                let base = hkcu
-                    .open_subkey_with_flags(base_path, KEY_READ | KEY_WRITE)
-                    .with_context(|| format!("opening {base_path}"))?;
-                let _ = base.delete_subkey_all(path);
+                if let Ok(base) = hkcu.open_subkey_with_flags(base_path, KEY_READ | KEY_WRITE) {
+                    let _ = base.delete_subkey_all(path);
+                }
             }
             Act::Shortcut { lnk, target, icon, args } => {
                 if let Some(parent) = lnk.parent() {
