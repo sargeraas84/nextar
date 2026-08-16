@@ -3,12 +3,12 @@
 // nextar icon generator — zero dependencies, pure Node.
 // Produces resources/nextar.ico (16/24/32/48/64/128/256) plus a 256px PNG.
 //
-// Design: a CLEAN VECTOR mark — the "convergence core". A circular glass
-// tile with a neon-cyan ring carries THREE nested chevron planes that fold
-// inward (outer electric violet → inner electric cyan) and feed a bright
-// core node with a soft cyan glow: files, folders and data streams being
-// compressed into one compact, intelligent point. Pure geometry, no
-// texture or noise — reads at 16px and up.
+// The mark is a RASTER logo: resources/logo-source.png is the single
+// source of truth (a wide isometric ribbon with an upward arrow on a
+// black tile). It is decoded in pure Node, padded to a square tile, and
+// downscaled with an area-average box filter into every icon size. The
+// previous procedural "convergence core" painter remains below as a
+// fallback when the source PNG is absent, so the pipeline never breaks.
 //
 // `--dark` renders the deep-navy glass variant (nextar-dark.ico/.png);
 // the app painter swaps palettes at runtime based on the Windows theme.
@@ -28,6 +28,192 @@ const RES = path.join(ROOT, 'resources');
 // leaving the default light tile as nextar.ico/.png). The app painter swaps
 // between the two automatically based on the Windows theme.
 const DARK = process.argv.includes('--dark');
+
+// ------------------------- raster logo source ---------------------------
+// resources/logo-source.png is the canonical logo. When present it drives
+// every asset below; the procedural painter below is only a fallback.
+const SRC = path.join(RES, 'logo-source.png');
+
+let _srcCache = null; // { size, rgba } square master once decoded
+
+// Minimal PNG decoder: non-interlaced, 8-bit, color types 0/2/3/4/6.
+function decodePNG(buf) {
+  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error('not a PNG');
+  let w = 0;
+  let h = 0;
+  let depth = 0;
+  let color = 0;
+  const idat = [];
+  let off = 8;
+  while (off + 8 <= buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString('ascii', off + 4, off + 8);
+    const data = buf.subarray(off + 8, off + 8 + len);
+    if (type === 'IHDR') {
+      w = data.readUInt32BE(0);
+      h = data.readUInt32BE(4);
+      depth = data[8];
+      color = data[9];
+      if (depth !== 8) throw new Error(`unsupported bit depth ${depth}`);
+      if (color === 3 && data[12] !== 0) throw new Error('interlaced palette unsupported');
+      if (data[12] !== 0) throw new Error('interlaced PNG unsupported');
+    } else if (type === 'IDAT') {
+      idat.push(data);
+    } else if (type === 'IEND') {
+      break;
+    }
+    off += 12 + len;
+  }
+  if (!w || !h) throw new Error('missing IHDR');
+  const ch = color === 0 ? 1 : color === 2 ? 3 : color === 4 ? 2 : color === 6 ? 4 : 0;
+  if (!ch) throw new Error(`unsupported color type ${color}`);
+  let raw = zlib.inflateSync(Buffer.concat(idat));
+  // palette for color type 3
+  let pal = null;
+  off = 8;
+  while (off + 8 <= buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString('ascii', off + 4, off + 8);
+    const data = buf.subarray(off + 8, off + 8 + len);
+    if (type === 'PLTE') pal = data;
+    off += 12 + len;
+  }
+  const bpp = ch;
+  const stride = w * bpp;
+  const out = Buffer.alloc(w * h * 4);
+  let rp = 0;
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < h; y++) {
+    const filter = raw[rp++];
+    const row = Buffer.alloc(stride);
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? row[x - bpp] : 0;
+      const b = prev[x];
+      const c = x >= bpp ? prev[x - bpp] : 0;
+      let v = raw[rp + x];
+      if (filter === 1) v = (v + a) & 0xff;
+      else if (filter === 2) v = (v + b) & 0xff;
+      else if (filter === 3) v = (v + ((a + b) >> 1)) & 0xff;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        v = (v + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xff;
+      }
+      row[x] = v;
+    }
+    rp += stride;
+    for (let x = 0; x < w; x++) {
+      const s = x * bpp;
+      const d = (y * w + x) * 4;
+      if (color === 0) {
+        out[d] = out[d + 1] = out[d + 2] = row[s];
+        out[d + 3] = 255;
+      } else if (color === 2) {
+        out[d] = row[s]; out[d + 1] = row[s + 1]; out[d + 2] = row[s + 2]; out[d + 3] = 255;
+      } else if (color === 4) {
+        out[d] = out[d + 1] = out[d + 2] = row[s];
+        out[d + 3] = row[s + 1];
+      } else if (color === 6) {
+        out[d] = row[s]; out[d + 1] = row[s + 1]; out[d + 2] = row[s + 2]; out[d + 3] = row[s + 3];
+      } else {
+        const pi = row[s] * 3;
+        out[d] = pal[pi]; out[d + 1] = pal[pi + 1]; out[d + 2] = pal[pi + 2]; out[d + 3] = 255;
+      }
+    }
+    prev = row;
+  }
+  return { width: w, height: h, rgba: out };
+}
+
+// Pad a (possibly non-square) RGBA image onto a square black canvas.
+// The logo's own background is black, so the padding blends seamlessly.
+function padSquare(img, size, scale) {
+  const s = scale || 0.86;
+  const dw = Math.round(size * s);
+  const dh = Math.round(dw * (img.height / img.width));
+  const dx = Math.round((size - dw) / 2);
+  const dy = Math.round((size - dh) / 2);
+  const out = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      out[(y * size + x) * 4 + 3] = 255;
+    }
+  }
+  const sy = (img.height / dh) || 1;
+  const sx = (img.width / dw) || 1;
+  for (let y = 0; y < dh; y++) {
+    const iy = Math.min(img.height - 1, Math.floor(y * sy));
+    for (let x = 0; x < dw; x++) {
+      const ix = Math.min(img.width - 1, Math.floor(x * sx));
+      const s = (iy * img.width + ix) * 4;
+      const d = ((dy + y) * size + dx + x) * 4;
+      const a = img.rgba[s + 3] / 255;
+      out[d] = Math.round(img.rgba[s] * a);
+      out[d + 1] = Math.round(img.rgba[s + 1] * a);
+      out[d + 2] = Math.round(img.rgba[s + 2] * a);
+      out[d + 3] = 255;
+    }
+  }
+  return { size, rgba: out };
+}
+
+// Area-average (box) downscale: the standard quality choice for shrinking
+// a logo to icon sizes. `img` is { size, rgba } of a square master.
+function downscaleSquare(img, size) {
+  const src = img.size;
+  if (size === src) return { size, rgba: Buffer.from(img.rgba) };
+  const out = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const y0 = Math.floor((y * src) / size);
+    const y1 = Math.max(y0, Math.ceil(((y + 1) * src) / size) - 1);
+    for (let x = 0; x < size; x++) {
+      const x0 = Math.floor((x * src) / size);
+      const x1 = Math.max(x0, Math.ceil(((x + 1) * src) / size) - 1);
+      let r = 0, g = 0, b = 0, a = 0, n = 0;
+      for (let yy = y0; yy <= y1; yy++) {
+        for (let xx = x0; xx <= x1; xx++) {
+          const i = (yy * src + xx) * 4;
+          const al = img.rgba[i + 3];
+          r += img.rgba[i] * al;
+          g += img.rgba[i + 1] * al;
+          b += img.rgba[i + 2] * al;
+          a += al;
+          n++;
+        }
+      }
+      const d = (y * size + x) * 4;
+      if (a > 0) {
+        out[d] = Math.round(r / a);
+        out[d + 1] = Math.round(g / a);
+        out[d + 2] = Math.round(b / a);
+        out[d + 3] = Math.round(a / n);
+      } else {
+        out[d] = out[d + 1] = out[d + 2] = 0;
+        out[d + 3] = 0;
+      }
+    }
+  }
+  return { size, rgba: out };
+}
+
+// Decode the source logo once and cache the square master.
+function rasterMaster() {
+  if (_srcCache) return _srcCache;
+  if (!fs.existsSync(SRC)) return null;
+  const img = decodePNG(fs.readFileSync(SRC));
+  _srcCache = padSquare(img, 1024);
+  return _srcCache;
+}
+
+// Render the raster logo at `size` (square). Returns null when the source
+// is missing so callers can fall back to the procedural painter.
+function renderRaster(size) {
+  const master = rasterMaster();
+  if (!master) return null;
+  return downscaleSquare(master, size);
+}
 
 // ----------------------------- PNG encoder -----------------------------
 const CRC_TABLE = (() => {
@@ -195,6 +381,13 @@ function palette(dark) {
 }
 
 function renderIcon(size, ss, dark) {
+  // When the raster logo source exists it is the single source of truth;
+  // the procedural painter below is the fallback. The `dark` palette is
+  // ignored for the raster (the logo is its own black tile on both themes).
+  const raster = renderRaster(size);
+  if (raster) {
+    return { size, rgba: raster.rgba, png: encodePNG(size, size, raster.rgba) };
+  }
   const SS = ss || 4;
   const S = size * SS;
   const acc = new Float32Array(S * S * 4);
@@ -320,7 +513,13 @@ function main() {
   fs.writeFileSync(path.join(RES, `nextar${tag}.png`), png256.png);
   fs.writeFileSync(path.join(RES, `nextar${tag}-chevron.png`), png256.png);
 
-  console.log(`[generate-icon] ${DARK ? 'dark' : 'light'} wrote resources/nextar${tag}.ico (16/24/32/48/64/128/256) + nextar${tag}.png (+ nextar${tag}-chevron.png)`);
+  // The square master the Rust painters embed and draw at runtime
+  // (512 px is crisp at every in-app size and keeps the binary lean).
+  // renderIcon prefers the raster source and always returns a .png.
+  const master = renderIcon(512, 1, DARK);
+  fs.writeFileSync(path.join(RES, 'logo-master.png'), master.png);
+
+  console.log(`[generate-icon] ${DARK ? 'dark' : 'light'} wrote resources/nextar${tag}.ico (16/24/32/48/64/128/256) + nextar${tag}.png (+ nextar${tag}-chevron.png, logo-master.png)`);
 }
 
 if (require.main === module) {

@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -1055,13 +1055,88 @@ fn blend_palettes(a: LogoPalette, b: LogoPalette, t: f32) -> LogoPalette {
 /// indigo → cyan) that fold inward and feed a bright core node. The tile
 /// swaps between frosted white (light mode) and deep navy (dark mode) to
 /// follow the Windows theme (mirrors nextar-gui and the icon generator).
+/// The raster logo (resources/logo-master.png — the isometric ribbon on a
+/// black square tile), decoded once at startup. Same source as nextar-gui.
+fn logo_image() -> &'static egui::ColorImage {
+    static IMG: OnceLock<egui::ColorImage> = OnceLock::new();
+    IMG.get_or_init(|| {
+        let bytes: &[u8] = include_bytes!("../../resources/logo-master.png");
+        let dec = png::Decoder::new(std::io::Cursor::new(bytes));
+        let mut reader = dec.read_info().expect("logo-master.png decodes");
+        let mut buf = vec![0u8; reader.output_buffer_size().expect("output size")];
+        let info = reader.next_frame(&mut buf).expect("logo frame");
+        let (w, h) = (info.width as usize, info.height as usize);
+        egui::ColorImage::from_rgba_unmultiplied([w, h], &buf[..w * h * 4])
+    })
+}
+
+/// The logo texture for this egui context, cached so it uploads once.
+fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
+    let key = egui::Id::new("nextar-logo-tex");
+    ctx.data_mut(|d| {
+        if let Some(tex) = d.get_temp::<egui::TextureHandle>(key) {
+            return tex;
+        }
+        let tex = ctx.load_texture("nextar-logo", logo_image().clone(), egui::TextureOptions::LINEAR);
+        d.insert_temp(key, tex.clone());
+        tex
+    })
+}
+
+/// Tessellate a rounded rectangle textured with `tex_id`, tinted `tint`,
+/// as a fan from the center with per-vertex UVs across the rect.
+fn rounded_image_mesh(rect: egui::Rect, radius: f32, tex_id: egui::TextureId, tint: Color32) -> egui::Mesh {
+    let mut mesh = egui::Mesh::default();
+    mesh.texture_id = tex_id;
+    let r = radius.clamp(0.0, rect.width().min(rect.height()) * 0.5);
+    let (l, t, rr, b) = (rect.left(), rect.top(), rect.right(), rect.bottom());
+    let w = rect.width();
+    let h = rect.height();
+    let push = |mesh: &mut egui::Mesh, x: f32, y: f32| {
+        let idx = mesh.vertices.len() as u32;
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: egui::pos2(x, y),
+            uv: egui::pos2((x - l) / w, (y - t) / h),
+            color: tint,
+        });
+        idx
+    };
+    let center = push(&mut mesh, rect.center().x, rect.center().y);
+    let mut ring: Vec<u32> = Vec::new();
+    let segs = 8usize;
+    let arc = |mesh: &mut egui::Mesh, cx: f32, cy: f32, a0: f32, a1: f32, ring: &mut Vec<u32>| {
+        for k in 0..segs {
+            let a = a0 + (a1 - a0) * (k as f32 / segs as f32);
+            ring.push(push(mesh, cx + r * a.cos(), cy + r * a.sin()));
+        }
+    };
+    // Clockwise (y-down, angle 0 = right): BR → BL → TL → TR corners.
+    arc(&mut mesh, rr - r, b - r, 0.0, std::f32::consts::FRAC_PI_2, &mut ring);
+    arc(&mut mesh, l + r, b - r, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, &mut ring);
+    arc(&mut mesh, l + r, t + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI, &mut ring);
+    arc(&mut mesh, rr - r, t + r, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI, &mut ring);
+    ring.push(ring[0]);
+    for k in 0..ring.len() - 1 {
+        mesh.indices.extend_from_slice(&[center, ring[k], ring[k + 1]]);
+    }
+    mesh
+}
+
+/// The brand tile: the raster logo drawn as a rounded square plus a thin
+/// neon ring for the lit-chrome accent. `fade` drives the entrance alpha.
 fn draw_logo_tile(p: &egui::Painter, rect: egui::Rect, fade: f32) {
     let w = rect.width();
+    let tex = logo_texture(p.ctx());
+    let radius = (w * 0.22).clamp(4.0, 40.0);
+    let tint = alpha(Color32::WHITE, fade);
+    p.add(rounded_image_mesh(rect, radius, tex.id(), tint));
     let pal = logo_palette();
-    let center = rect.center();
-    let radius = 0.44 * w; // circle inscribed in the 6%-inset content box
-    p.add(circle_tile_mesh(rect, radius, |t| alpha(tile_grad(t, pal), fade)));
-    p.circle_stroke(center, radius, Stroke::new((0.018 * w).max(1.2), alpha(pal.bezel, fade)));
+    p.rect_stroke(
+        rect,
+        CornerRadius::same(radius as u8),
+        Stroke::new((0.012 * w).max(1.0), alpha(pal.bezel, fade * 0.55)),
+        egui::StrokeKind::Inside,
+    );
 }
 
 fn draw_logo_at(p: &egui::Painter, rect: egui::Rect, fade: f32) {
@@ -1120,115 +1195,15 @@ fn draw_logo_boot(ui: &mut egui::Ui, size: f32, born: Instant) {
     }
 }
 
-/// A perfect circular tile filled with a smooth vertical gradient,
-/// tessellated as a mesh with per-vertex colors sampled from `color_at(0..1)`.
-/// Mirrors the icon generator's circular-tile SDF so the tile is a clean
-/// circle at every size (sidebar, Home, splash, shell, wizard).
-fn circle_tile_mesh(rect: egui::Rect, radius: f32, color_at: impl Fn(f32) -> Color32) -> egui::Mesh {
-    let mut mesh = egui::Mesh::default();
-    let c = rect.center();
-    let r = radius.clamp(0.0, rect.width().min(rect.height()) * 0.5);
-    let inv_h = 1.0 / rect.height().max(f32::EPSILON);
+/// Core position + radius (unit coords, y down) used by the converging
+/// particles and the boot energy pulse (both are centered on the tile).
+const CORE: (f32, f32, f32) = (0.5, 0.5, 0.050);
 
-    let v = |mesh: &mut egui::Mesh, x: f32, y: f32| {
-        let idx = mesh.vertices.len() as u32;
-        mesh.vertices.push(egui::epaint::Vertex {
-            pos: egui::pos2(x, y),
-            uv: egui::epaint::WHITE_UV,
-            color: color_at(((y - rect.top()) * inv_h).clamp(0.0, 1.0)),
-        });
-        idx
-    };
-    let center = v(&mut mesh, c.x, c.y);
-    let n = 48usize;
-    let ring0 = mesh.vertices.len() as u32;
-    for k in 0..n {
-        let a = std::f32::consts::TAU * k as f32 / n as f32;
-        v(&mut mesh, c.x + r * a.cos(), c.y + r * a.sin());
-    }
-    // fan from the center; winding matches the chrome mesh convention
-    for k in 0..n {
-        mesh.indices.extend_from_slice(&[
-            center,
-            ring0 + k as u32,
-            ring0 + ((k + 1) % n) as u32,
-        ]);
-    }
-    mesh
-}
-
-/// Tile gradient (top → bottom): frosted white → pale cyan → cool blue for
-/// light mode, deep navy glass for dark mode; soft pink reflection at the
-/// bottom edge.
-fn tile_grad(t: f32, pal: LogoPalette) -> Color32 {
-    let t = t.clamp(0.0, 1.0);
-    let c = if t < 0.5 {
-        Color32::from_rgb(
-            lerp8(pal.tile_a.r(), pal.tile_b.r(), t * 2.0),
-            lerp8(pal.tile_a.g(), pal.tile_b.g(), t * 2.0),
-            lerp8(pal.tile_a.b(), pal.tile_b.b(), t * 2.0),
-        )
-    } else {
-        Color32::from_rgb(
-            lerp8(pal.tile_b.r(), pal.tile_c.r(), (t - 0.5) * 2.0),
-            lerp8(pal.tile_b.g(), pal.tile_c.g(), (t - 0.5) * 2.0),
-            lerp8(pal.tile_b.b(), pal.tile_c.b(), (t - 0.5) * 2.0),
-        )
-    };
-    let u = (t - 1.12) / 0.30;
-    let mag = (-u * u).exp() * 0.22;
-    Color32::from_rgb(
-        lerp8(c.r(), pal.tile_mag.r(), mag),
-        lerp8(c.g(), pal.tile_mag.g(), mag),
-        lerp8(c.b(), pal.tile_mag.b(), mag),
-    )
-}
-
-/// One converging chevron plane: half-reach, top y, apex y, half-width.
-/// Unit coords, y down; planes are drawn outer → inner (violet → cyan).
-const PLANES: [(f32, f32, f32, f32); 3] = [
-    (0.300, 0.240, 0.520, 0.030),
-    (0.215, 0.360, 0.610, 0.028),
-    (0.130, 0.470, 0.680, 0.026),
-];
-
-/// Core node position + radius (unit coords, y down).
-const CORE: (f32, f32, f32) = (0.5, 0.735, 0.050);
-
-/// The convergence-core mark: three nested chevron planes fold inward
-/// (violet → indigo → cyan) and feed a bright core node with a soft glow —
-/// files, folders and data streams compressed into one intelligent point.
-/// Unit coords mirror the icon generator exactly; the tile is the 6%-inset
-/// content box (0.06 + 0.88u). `build` (0..1) staggers the planes outer →
-/// inner so the boot moment looks like layers folding into place.
-fn converge_mark(p: &egui::Painter, rect: egui::Rect, pal: LogoPalette, fade: f32, build: f32) {
-    let w = rect.width();
-    let h = rect.height();
-    let ux = |v: f32| rect.left() + (0.06 + 0.88 * v) * w;
-    let uy = |t: f32| rect.top() + (0.06 + 0.88 * t) * h;
-    let colors = [pal.layer_a, pal.layer_b, pal.layer_c];
-    for (k, (reach, top, apex, hw)) in PLANES.iter().enumerate() {
-        let kf = fade * smoothstep((build - 0.14 * k as f32) / 0.5, 0.0, 1.0);
-        if kf <= 0.002 {
-            continue;
-        }
-        let l = egui::pos2(ux(0.5 - reach), uy(*top));
-        let a = egui::pos2(ux(0.5), uy(*apex));
-        let r = egui::pos2(ux(0.5 + reach), uy(*top));
-        let stroke = Stroke::new((2.0 * hw * 0.88 * w).max(1.0), alpha(colors[k], kf));
-        p.add(egui::Shape::line(vec![l, a, r], stroke));
-    }
-    // core node: soft glow halo + bright dot + white inner spark
-    let kf = fade * smoothstep((build - 0.25) / 0.5, 0.0, 1.0);
-    if kf > 0.002 {
-        let core = egui::pos2(ux(CORE.0), uy(CORE.1));
-        let r = CORE.2 * 0.88 * w;
-        p.circle_filled(core, r * 1.7, alpha(pal.glow, 0.30 * kf));
-        p.circle_filled(core, r * 1.35, alpha(pal.glow, 0.40 * kf));
-        p.circle_filled(core, r, alpha(pal.core, kf));
-        p.circle_filled(egui::pos2(core.x, core.y - r * 0.25), r * 0.38, alpha(Color32::WHITE, 0.9 * kf));
-    }
-}
+/// The raster logo carries the mark itself, so the old chevron fold-in is
+/// gone. This hook keeps the boot-animation call sites intact; the entrance
+/// is the tile's fade + zoom plus the particles, sweep band and pulse that
+/// the callers already compose around it.
+fn converge_mark(_p: &egui::Painter, _rect: egui::Rect, _pal: LogoPalette, _fade: f32, _build: f32) {}
 
 /// The boot-moment fragments: scattered digital particles converge into the
 /// core (the "files being compressed" read). `t` is seconds since launch.
@@ -2160,12 +2135,14 @@ mod tests {
     }
 
     #[test]
-    fn circle_tile_mesh_covers_center_not_corners() {
-        // The tile mesh must fill the circle: center and edge midpoints
-        // covered, the four corners left empty, consistent winding.
+    fn rounded_image_mesh_covers_center_not_corners() {
+        // The rounded-square tile mesh must fill the tile: center and edge
+        // midpoints covered, the four corners (outside the rounding) left
+        // empty, consistent winding.
         let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(100.0, 100.0));
-        let mesh = circle_tile_mesh(rect, 44.0, |_| Color32::from_rgb(255, 0, 0));
+        let mesh = rounded_image_mesh(rect, 20.0, egui::TextureId::Managed(1), Color32::from_rgb(255, 0, 0));
         assert_eq!(mesh.indices.len() % 3, 0);
+        assert_eq!(mesh.texture_id, egui::TextureId::Managed(1));
         let tri = |i: usize| -> [egui::Pos2; 3] {
             [
                 mesh.vertices[mesh.indices[i * 3] as usize].pos,
@@ -2194,12 +2171,31 @@ mod tests {
             })
         };
         assert!(inside(egui::pos2(50.0, 50.0)), "center should be covered");
-        assert!(inside(egui::pos2(50.0, 8.0)), "top of circle should be covered");
-        assert!(inside(egui::pos2(8.0, 50.0)), "left of circle should be covered");
-        assert!(!inside(egui::pos2(2.0, 2.0)), "top-left corner should be empty");
-        assert!(!inside(egui::pos2(98.0, 2.0)), "top-right corner should be empty");
-        assert!(!inside(egui::pos2(2.0, 98.0)), "bottom-left corner should be empty");
-        assert!(!inside(egui::pos2(98.0, 98.0)), "bottom-right corner should be empty");
+        assert!(inside(egui::pos2(50.0, 8.0)), "top edge should be covered");
+        assert!(inside(egui::pos2(8.0, 50.0)), "left edge should be covered");
+        assert!(!inside(egui::pos2(1.0, 1.0)), "top-left corner should be empty");
+        assert!(!inside(egui::pos2(99.0, 1.0)), "top-right corner should be empty");
+        assert!(!inside(egui::pos2(1.0, 99.0)), "bottom-left corner should be empty");
+        assert!(!inside(egui::pos2(99.0, 99.0)), "bottom-right corner should be empty");
+    }
+
+    #[test]
+    fn embedded_logo_is_square_rgba() {
+        let img = logo_image();
+        assert_eq!(img.size[0], img.size[1], "logo tile must be square");
+        assert!(img.size[0] > 0);
+        let total = img.pixels.len();
+        assert_eq!(total, img.size[0] * img.size[1]);
+        let colorful = img
+            .pixels
+            .iter()
+            .filter(|p| {
+                let m = p.r().max(p.g()).max(p.b());
+                (m as i32 > 40)
+                    && ((m as i32 - p.r() as i32).abs().max((m as i32 - p.g() as i32).abs()) > 20)
+            })
+            .count();
+        assert!(colorful > total / 50, "logo must contain visible color content");
     }
 
     #[test]

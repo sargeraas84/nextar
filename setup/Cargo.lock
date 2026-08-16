@@ -1850,6 +1850,7 @@ dependencies = [
  "anyhow",
  "eframe",
  "embed-resource",
+ "png",
  "raw-window-handle",
  "rfd",
  "serde",

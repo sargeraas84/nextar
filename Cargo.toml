@@ -47,6 +47,9 @@ serde_json = "1"
 walkdir = "2"
 eframe = "0.36.1"
 rfd = "0.17.2"
+# Decodes the embedded raster logo (resources/logo-master.png) at startup
+# so the painter can draw the brand mark as a texture.
+png = "0.18"
 
 [target.'cfg(windows)'.dependencies]
 # Windows-only integrations (theme detection, registry, native window chrome).

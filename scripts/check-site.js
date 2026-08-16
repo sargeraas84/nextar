@@ -99,6 +99,7 @@ function isValidIco(file) {
 const expectedPNG = {
   'og-image.png': [1200, 630],
   'apple-touch-icon.png': [180, 180],
+  'logo.png': [512, 512],
   'icon-192.png': [192, 192],
   'icon-512.png': [512, 512],
 };

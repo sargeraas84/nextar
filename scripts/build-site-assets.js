@@ -142,6 +142,10 @@ fs.writeFileSync(path.join(SITE, 'apple-touch-icon.png'), encodePNG(180, 180, ma
 fs.writeFileSync(path.join(SITE, 'icon-192.png'), encodePNG(192, 192, markOnNavy(192, 0.85)));
 fs.writeFileSync(path.join(SITE, 'icon-512.png'), encodePNG(512, 512, markOnNavy(512, 0.85)));
 fs.writeFileSync(path.join(SITE, 'og-image.png'), ogImage());
+// The hero + brand-mark logos reference this file (they used to inline the
+// mark as a giant base64 blob; a file keeps the HTML lean and always in
+// sync with the raster logo).
+fs.writeFileSync(path.join(SITE, 'logo.png'), renderIcon(512, 2, false).png);
 
 const manifest = {
   name: 'nextar',
@@ -160,5 +164,5 @@ const manifest = {
 fs.writeFileSync(path.join(SITE, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
 console.log(
-  'wrote site/favicon.ico, apple-touch-icon.png, icon-192.png, icon-512.png, og-image.png, manifest.json'
+  'wrote site/favicon.ico, apple-touch-icon.png, icon-192.png, icon-512.png, og-image.png, logo.png, manifest.json'
 );

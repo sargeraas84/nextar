@@ -2164,6 +2164,7 @@ dependencies = [
  "eframe",
  "embed-resource",
  "num_cpus",
+ "png",
  "rand",
  "raw-window-handle",
  "reed-solomon-erasure",

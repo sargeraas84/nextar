@@ -17,6 +17,9 @@ eframe = "0.36.1"
 rfd = "0.17.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Decodes the embedded raster logo (resources/logo-master.png) at startup
+# so the wizard painter can draw the brand mark as a texture.
+png = "0.18"
 
 [target.'cfg(windows)'.dependencies]
 # Native window chrome: title bar follows the app palette via DWM attributes.
