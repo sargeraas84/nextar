@@ -255,9 +255,11 @@ jobs:
           # badges (which read them from the release body) show the same
           # hashes as the files being served.
           BODY=$(gh api "repos/${{ github.repository }}/releases/tags/nightly" --jq '.body')
-          EXE_BODY=$(printf '%s' "$BODY" | grep -m1 'nextar-setup.exe:' | awk '{print $2}')
-          DMG_BODY=$(printf '%s' "$BODY" | grep -m1 'nextar-macos.dmg:' | awk '{print $2}')
+          # Body line format is `- nextar-setup.exe: <sha256>` → checksum is
+          # field 3 (field 2 is the `nextar-setup.exe:` name).
+          EXE_BODY=$(printf '%s' "$BODY" | grep -m1 'nextar-setup.exe:' | awk '{print $3}')
+          DMG_BODY=$(printf '%s' "$BODY" | grep -m1 'nextar-macos.dmg:' | awk '{print $3}')
           echo "body: nextar-setup.exe=$EXE_BODY nextar-macos.dmg=$DMG_BODY"
           [ "$EXE_BODY" = "$EXE_EXPECTED" ] || { echo "::error::release body nextar-setup.exe checksum mismatch (badge would lie)"; exit 1; }
           [ "$DMG_BODY" = "$DMG_EXPECTED" ] || { echo "::error::release body nextar-macos.dmg checksum mismatch (badge would lie)"; exit 1; }
-          echo "✅ nightly release verified: 2 assets, downloads 200, served + body checksums match"
+          echo "✅ nightly release verified: downloads 200, served + body checksums match"
