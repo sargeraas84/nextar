@@ -42,6 +42,22 @@ jobs:
           ./target/release/nextar.exe create screenshots/fixtures -o sample.next
           ./target/release/nextar.exe list sample.next
 
+      # ffmpeg powers the animated demo GIF. setup-ffmpeg@v3 is the standard
+      # action but has been flaky in the past; if it fails to put ffmpeg on
+      # PATH, fall back to winget so the GIF step still runs.
+      - name: Install ffmpeg
+        id: ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        continue-on-error: true
+
+      - name: Ensure ffmpeg (fallback)
+        if: steps.ffmpeg.outcome == 'failure'
+        shell: pwsh
+        run: |
+          winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements --disable-interactivity
+          $ff = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if ($ff) { Write-Host "ffmpeg found: $($ff.FullName)" } else { throw "ffmpeg not found after winget install" }
+
       - name: Capture all views
         shell: pwsh
         env:
@@ -52,6 +68,26 @@ jobs:
             -OutDir "$env:GITHUB_WORKSPACE/staging" `
             -ArchiveArg "sample.next" `
             -Seed "$env:SEED"
+
+      # Animated demo GIF: same launch, but grabs the splash + Home entrance
+      # and view transitions as frames, then assembles with ffmpeg. If the
+      # runner has no ffmpeg this is skipped (the committed GIF is uploaded
+      # unchanged) rather than failing the whole screenshot job.
+      - name: Capture demo GIF
+        shell: pwsh
+        run: |
+          $ff = (Get-Command ffmpeg -ErrorAction SilentlyContinue)
+          if (-not $ff) {
+            $ffPath = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($ffPath) { $ff = $ffPath.FullName }
+          }
+          if (-not $ff) { Write-Host "ffmpeg unavailable - keeping committed GIF"; exit 0 }
+          $ffBin = if ($ff -is [string]) { $ff } else { $ff.Source }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/capture-gif.ps1 `
+            -Exe "$env:GITHUB_WORKSPACE/target/release/nextar-gui.exe" `
+            -Out "$env:GITHUB_WORKSPACE/screenshots/nextar-demo.gif" `
+            -Ffmpeg "$ffBin"
+          if ($LASTEXITCODE -ne 0) { Write-Host "gif capture failed - keeping committed GIF"; exit 0 }
 
       - name: Upload to the nightly release
         shell: bash

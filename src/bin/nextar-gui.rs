@@ -1454,6 +1454,89 @@ fn action_card(ui: &mut egui::Ui, icon: Icon, title: &str, desc: &str, col: Colo
     resp
 }
 
+/// A card-style text field: the themed TextEdit is wrapped in a filled,
+/// rounded container so inputs read as part of the app's glassy surface
+/// instead of egui's default flat boxes. `.frame(false)` on the inner edit
+/// lets the card's own fill/stroke show through.
+fn field_edit(ui: &mut egui::Ui, text: &mut String, hint: &str, width: f32, password: bool) -> egui::Response {
+    let mut te = egui::TextEdit::singleline(text)
+        .hint_text(hint)
+        .frame(egui::Frame::NONE)
+        .desired_width(f32::INFINITY);
+    if password {
+        te = te.password(true);
+    }
+    egui::Frame::new()
+        .fill(surface())
+        .stroke(Stroke::new(1.0, border()))
+        .corner_radius(CornerRadius::same(9))
+        .inner_margin(Margin::symmetric(10, 7))
+        .show(ui, |ui| {
+            ui.set_min_width(width);
+            ui.add(te)
+        })
+        .inner
+}
+
+/// A Recent-archives pill: compact glass chip with a package glyph, the
+/// archive name, and a chevron that lights cyan on hover — same interactive
+/// language as the QUICK ACTIONS cards but sized for a horizontal strip.
+fn recent_pill(ui: &mut egui::Ui, name: &str, is_next: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(168.0, 40.0), egui::Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return resp;
+    }
+    let p = ui.painter();
+    let hovered = resp.hovered();
+    let pressed = resp.is_pointer_button_down_on();
+    let r = rect.translate(Vec2::new(0.0, if hovered { -1.5 } else { 0.0 }));
+    let corner = CornerRadius::same(10);
+    p.rect_filled(
+        r.translate(Vec2::new(0.0, 2.0)),
+        corner,
+        Color32::from_rgba_unmultiplied(0, 0, 0, if hovered { 60 } else { 30 }),
+    );
+    p.rect_filled(r, corner, alpha(if pressed { dim(bg2(), 0.9) } else { bg2() }, 1.0));
+    p.rect_stroke(
+        r,
+        corner,
+        Stroke::new(1.0, if hovered { alpha(neon_cyan(), 0.75) } else { alpha(border(), 0.8) }),
+        egui::StrokeKind::Inside,
+    );
+    // package glyph chip
+    let chip = egui::Rect::from_center_size(egui::pos2(r.left() + 21.0, r.center().y), Vec2::splat(24.0));
+    p.rect_filled(chip, CornerRadius::same(7), alpha(if hovered { neon_cyan() } else { grad_color(0.2) }, 0.12));
+    p.rect_stroke(
+        chip,
+        CornerRadius::same(7),
+        Stroke::new(1.0, alpha(if hovered { neon_cyan() } else { grad_color(0.2) }, 0.5)),
+        egui::StrokeKind::Inside,
+    );
+    p.text(chip.center(), egui::Align2::CENTER_CENTER, if is_next { "📦" } else { "📁" }, egui::FontId::proportional(12.0), text2());
+    // name (truncated by the pill width)
+    let txt = if name.chars().count() > 15 {
+        let short: String = name.chars().take(13).collect();
+        format!("{short}…")
+    } else {
+        name.to_string()
+    };
+    p.text(
+        egui::pos2(r.left() + 40.0, r.center().y),
+        egui::Align2::LEFT_CENTER,
+        txt,
+        egui::FontId::proportional(12.0),
+        if hovered { text() } else { text2() },
+    );
+    // chevron lights up on hover (mirrors action_card)
+    let chev = alpha(if hovered { neon_cyan() } else { text3() }, 1.0);
+    p.line_segment([egui::pos2(r.right() - 19.0, r.center().y - 3.5), egui::pos2(r.right() - 14.0, r.center().y)], Stroke::new(1.6, chev));
+    p.line_segment([egui::pos2(r.right() - 14.0, r.center().y), egui::pos2(r.right() - 19.0, r.center().y + 3.5)], Stroke::new(1.6, chev));
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
+}
+
 /// The Home centerpiece: a large glass drop target with corner brackets,
 /// a down-arrow chip and a softly pulsing hairline. Clicking opens the
 /// picker; actual drops are handled by `handle_drops`.
@@ -1467,6 +1550,18 @@ fn home_drop_zone(ui: &mut egui::Ui) -> egui::Response {
     let hovered = resp.hovered();
     let pulse = ((ui.input(|i| i.time) * 1.6).sin() * 0.5 + 0.5) as f32;
     let corner = CornerRadius::same(18);
+    // soft outer glow on hover: two expanding hairline rings so the stage
+    // reads as luminous before anything is dropped.
+    if hovered && !reduced_motion() {
+        for (i, (g, a)) in [(8.0, 0.16), (16.0, 0.08)].iter().enumerate() {
+            p.rect_stroke(
+                rect.expand2(Vec2::splat(*g)),
+                CornerRadius::same(22 + i as u8 * 2),
+                Stroke::new(2.0, alpha(neon_cyan(), *a)),
+                egui::StrokeKind::Outside,
+            );
+        }
+    }
     p.rect_filled(rect, corner, alpha(surface(), if hovered { 1.0 } else { 0.86 }));
     p.rect_stroke(
         rect,
@@ -1508,8 +1603,8 @@ fn home_drop_zone(ui: &mut egui::Ui) -> egui::Response {
         egui::pos2(rect.center().x, chip.bottom() + 38.0),
         egui::Align2::CENTER_CENTER,
         "click to browse — .next archives open in Inspect",
-        egui::FontId::proportional(11.5),
-        text3(),
+        egui::FontId::proportional(if hovered { 11.8 } else { 11.5 }),
+        if hovered { alpha(neon_cyan(), 0.95) } else { text3() },
     );
     if resp.has_focus() {
         p.rect_stroke(rect.expand2(Vec2::new(2.0, 2.0)), corner, Stroke::new(1.5, alpha(neon_cyan(), 0.9)), egui::StrokeKind::Inside);
@@ -2703,11 +2798,7 @@ impl GuiApp {
                                     .file_name()
                                     .map(|n| n.to_string_lossy().into_owned())
                                     .unwrap_or_else(|| path.clone());
-                                let btn = ui.add(
-                                    egui::Button::new(RichText::new(format!("📦 {name}")).size(12.0).color(text2()))
-                                        .corner_radius(CornerRadius::same(8)),
-                                );
-                                if btn.clicked() {
+                                if recent_pill(ui, &name, path.ends_with(".next")).clicked() {
                                     self.inspect_archive = path.clone();
                                     self.extract_archive = path.clone();
                                     self.inspect_data = None;
@@ -2799,10 +2890,12 @@ impl GuiApp {
                     .spacing([14.0, 10.0])
                     .show(ui, |ui| {
                         ui.label("Output");
-                        let out_resp = ui.add(
-                            egui::TextEdit::singleline(&mut self.create_output)
-                                .hint_text("e.g. backup.next (default: <input>.next)")
-                                .desired_width(320.0),
+                        let out_resp = field_edit(
+                            ui,
+                            &mut self.create_output,
+                            "e.g. backup.next (default: <input>.next)",
+                            320.0,
+                            false,
                         );
                         if out_resp.changed() {
                             self.create_output_manual = !self.create_output.trim().is_empty();
@@ -2836,11 +2929,17 @@ impl GuiApp {
                         ui.end_row();
 
                         ui.label("Block size");
-                        ui.add(egui::TextEdit::singleline(&mut self.create_block).hint_text("1M").desired_width(80.0));
+                        field_edit(ui, &mut self.create_block, "1M", 80.0, false);
                         ui.end_row();
 
                         ui.label("Password");
-                        ui.add(egui::TextEdit::singleline(&mut self.create_password).password(true).hint_text("optional — AES-256-GCM-class auth (XChaCha20-Poly1305)").desired_width(320.0));
+                        field_edit(
+                            ui,
+                            &mut self.create_password,
+                            "optional — AES-256-GCM-class auth (XChaCha20-Poly1305)",
+                            320.0,
+                            true,
+                        );
                         ui.end_row();
 
                         ui.label("Recovery");
@@ -2887,7 +2986,7 @@ impl GuiApp {
                 ui.set_width(ui.available_width());
                 ui.label(RichText::new("Archive").size(12.0).color(text3()));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.extract_archive).hint_text("path to .next archive — drop it here").desired_width(340.0));
+                    field_edit(ui, &mut self.extract_archive, "path to .next archive — drop it here", 340.0, false);
                     if ui.button("browse…").clicked() {
                         if let Some(f) = rfd::FileDialog::new().add_filter("nextar archive", &["next"]).pick_file() {
                             self.extract_archive = f.display().to_string();
@@ -2897,7 +2996,7 @@ impl GuiApp {
                 ui.add_space(8.0);
                 ui.label(RichText::new("Output folder").size(12.0).color(text3()));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.extract_output).hint_text("current folder").desired_width(340.0));
+                    field_edit(ui, &mut self.extract_output, "current folder", 340.0, false);
                     if ui.button("browse…").clicked() {
                         if let Some(d) = rfd::FileDialog::new().pick_folder() {
                             self.extract_output = d.display().to_string();
@@ -2906,7 +3005,7 @@ impl GuiApp {
                 });
                 ui.add_space(8.0);
                 ui.label(RichText::new("Password").size(12.0).color(text3()));
-                ui.add(egui::TextEdit::singleline(&mut self.extract_password).password(true).hint_text("only if the archive is encrypted").desired_width(340.0));
+                field_edit(ui, &mut self.extract_password, "only if the archive is encrypted", 340.0, true);
             });
         ui.add_space(10.0);
 
@@ -2956,7 +3055,7 @@ impl GuiApp {
         }
 
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.inspect_archive).hint_text("path to .next archive — drop it here").desired_width(340.0));
+            field_edit(ui, &mut self.inspect_archive, "path to .next archive — drop it here", 340.0, false);
             if ui.button("browse…").clicked() {
                 if let Some(f) = rfd::FileDialog::new().add_filter("nextar archive", &["next"]).pick_file() {
                     self.inspect_archive = f.display().to_string();
@@ -3591,7 +3690,7 @@ impl GuiApp {
                 ui.set_width(ui.available_width());
                 ui.label(RichText::new("Corrupted archive").size(12.0).color(text3()));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.repair_archive).hint_text("drop the archive here").desired_width(340.0));
+                    field_edit(ui, &mut self.repair_archive, "drop the archive here", 340.0, false);
                     if ui.button("browse…").clicked() {
                         if let Some(f) = rfd::FileDialog::new().add_filter("nextar archive", &["next"]).pick_file() {
                             self.repair_archive = f.display().to_string();
@@ -3601,7 +3700,7 @@ impl GuiApp {
                 ui.add_space(8.0);
                 ui.label(RichText::new("Recovery volume (.nvol)").size(12.0).color(text3()));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.repair_volume).hint_text("drop the volume here").desired_width(340.0));
+                    field_edit(ui, &mut self.repair_volume, "drop the volume here", 340.0, false);
                     if ui.button("browse…").clicked() {
                         if let Some(f) = rfd::FileDialog::new().add_filter("recovery volume", &["nvol"]).pick_file() {
                             self.repair_volume = f.display().to_string();
@@ -3611,7 +3710,7 @@ impl GuiApp {
                 ui.add_space(8.0);
                 ui.label(RichText::new("Output").size(12.0).color(text3()));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.repair_output).hint_text("default: <name>.repaired.next").desired_width(340.0));
+                    field_edit(ui, &mut self.repair_output, "default: <name>.repaired.next", 340.0, false);
                     if ui.button("browse…").clicked() {
                         if let Some(f) = rfd::FileDialog::new().set_file_name("repaired.next").save_file() {
                             self.repair_output = f.display().to_string();

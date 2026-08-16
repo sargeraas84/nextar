@@ -780,6 +780,17 @@
           <span class="smoke-bt">checking…</span>
         </div>
       </div>
+
+      <!-- Screenshot gallery status: reads the nightly release's gallery
+           assets (refreshed by the screenshots workflow) so the download
+           page always points at the freshest captures. -->
+      <div id="shots-strip" class="reveal" style="--d:.30s;margin-top:12px;max-width:720px;margin-left:auto;margin-right:auto">
+        <a class="smoke-card" id="shots-card" href="https://github.com/sargeraas84/nextar/releases" target="_blank" rel="noopener" style="text-decoration:none">
+          <span class="smoke-dot"></span>
+          <span class="smoke-t">screenshots</span>
+          <span class="smoke-bt">checking…</span>
+        </a>
+      </div>
     </div>
   </section>
 </main>
@@ -1028,6 +1039,43 @@
       })
       .catch(function(){
         paintSmoke(smokeCard, null, 'daily smoke · unavailable');
+      });
+    }
+  }
+
+  // Screenshot gallery: read the nightly release's gallery assets (the
+  // screenshots workflow re-uploads them with --clobber, so the names are
+  // stable) and confirm the six views are all present, then link to them.
+  var shotsCard = document.getElementById('shots-card');
+  if (shotsCard) {
+    function paintShots(ok, text, tip){
+      if(!shotsCard) return;
+      shotsCard.classList.toggle('ok', ok === true);
+      shotsCard.classList.toggle('bad', ok === false);
+      var bt = shotsCard.querySelector('.smoke-bt');
+      if(bt) bt.textContent = text;
+      if(tip) shotsCard.title = tip;
+    }
+    if (local) {
+      paintShots(null, 'screenshots · local mode — not shown');
+    } else {
+      fetch('https://api.github.com/repos/' + REPO + '/releases/tags/nightly')
+      .then(function(r){ if(!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(rel){
+        var names = (rel.assets || []).map(function(a){ return a.name; });
+        var want = ['nextar-home.png','nextar-create.png','nextar-extract.png','nextar-inspect.png','nextar-repair.png','nextar-settings.png'];
+        var missing = want.filter(function(w){ return names.indexOf(w) === -1; });
+        var updated = (rel.assets || []).map(function(a){ return a.updated_at; }).sort().pop() || '';
+        var day = (updated.match(/^(\d{4}-\d{2}-\d{2})/) || [])[1] || '';
+        if (missing.length) {
+          paintShots(false, 'screenshots · ' + (missing.length) + ' missing from nightly', 'Missing: ' + missing.join(', '));
+        } else {
+          paintShots(true, ['screenshots', day || 'nightly', '6 views — click to view'].filter(Boolean).join(' · '),
+            'Fresh captures from the nightly build — click to open the releases page.');
+        }
+      })
+      .catch(function(){
+        paintShots(null, 'screenshots · unavailable');
       });
     }
   }
