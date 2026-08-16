@@ -127,18 +127,67 @@ function decodePNG(buf) {
   return { width: w, height: h, rgba: out };
 }
 
-// Pad a (possibly non-square) RGBA image onto a square TRANSPARENT canvas.
-// The source logo already carries its own transparency (the ribbon on a
-// transparent background), so the padding preserves each pixel's alpha and
-// the mark floats without any tile/bezel. Used only for the square icon
-// surfaces (ico/icns/exe) where a square canvas is required by the format.
+// Pad a (possibly non-square) RGBA image onto a square TRANSPARENT canvas
+// with a rounded-corner tile behind it. Used only for the square icon
+// surfaces (ico/icns/exe/site brand-mark) where a square canvas is
+// required by the format: a deep-navy glass squircle with a soft cyan
+// glow and a thin neon ring, corners fully transparent so the mark reads
+// as a rounded tile rather than a plain square. The ribbon blits on top.
 function padSquare(img, size, scale) {
   const s = scale || 0.86;
   const dw = Math.round(size * s);
   const dh = Math.round(dw * (img.height / img.width));
   const dx = Math.round((size - dw) / 2);
   const dy = Math.round((size - dh) / 2);
-  const out = Buffer.alloc(size * size * 4); // zeroed => alpha 0 (transparent)
+  const out = Buffer.alloc(size * size * 4); // zeroed => alpha 0
+
+  // --- rounded-corner tile ---
+  const margin = Math.round(size * 0.045);
+  const r = Math.round(size * 0.22);
+  const cx = size / 2;
+  const cy = size / 2;
+  const hw = size / 2 - margin;
+  const hh = size / 2 - margin;
+  const ringW = Math.max(1.5, size * 0.012);
+  const glowR = size * 0.32;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      // signed distance to the rounded rect (negative inside)
+      const qx = Math.abs(px - cx) - (hw - r);
+      const qy = Math.abs(py - cy) - (hh - r);
+      const d =
+        Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+      const cover = Math.min(1, Math.max(0, 0.5 - d)); // AA edge
+      if (cover <= 0) continue;
+      const i = (y * size + x) * 4;
+      // deep-navy vertical gradient (lighter at top)
+      const t = y / size;
+      let R = 0x07 + (0x0d - 0x07) * (1 - t);
+      let G = 0x0a + (0x12 - 0x0a) * (1 - t);
+      let B = 0x12 + (0x22 - 0x12) * (1 - t);
+      // soft cyan glow from the center
+      const gd = Math.hypot(px - cx, py - cy) / glowR;
+      const glow = Math.exp(-gd * gd) * 0.35;
+      R += 0x20 * glow;
+      G += 0x5f * glow;
+      B += 0x8a * glow;
+      // thin neon ring hugging the rounded edge
+      if (d > -ringW && d < 0) {
+        const k = 1 + d / ringW; // 1 at the edge, 0 inward
+        R = R * (1 - k) + 0x00 * k;
+        G = G * (1 - k) + 0xd9 * k;
+        B = B * (1 - k) + 0xff * k;
+      }
+      out[i] = Math.min(255, Math.round(R));
+      out[i + 1] = Math.min(255, Math.round(G));
+      out[i + 2] = Math.min(255, Math.round(B));
+      out[i + 3] = Math.round(cover * 255);
+    }
+  }
+
+  // --- ribbon on top (source-over) ---
   const sy = (img.height / dh) || 1;
   const sx = (img.width / dw) || 1;
   for (let y = 0; y < dh; y++) {
@@ -147,10 +196,17 @@ function padSquare(img, size, scale) {
       const ix = Math.min(img.width - 1, Math.floor(x * sx));
       const s = (iy * img.width + ix) * 4;
       const d = ((dy + y) * size + dx + x) * 4;
-      out[d] = img.rgba[s];
-      out[d + 1] = img.rgba[s + 1];
-      out[d + 2] = img.rgba[s + 2];
-      out[d + 3] = img.rgba[s + 3];
+      const a = img.rgba[s + 3] / 255;
+      if (a <= 0) continue;
+      const outA = out[d + 3] / 255;
+      // premultiplied source-over
+      const na = a + outA * (1 - a);
+      if (na > 0) {
+        out[d] = Math.min(255, Math.round((img.rgba[s] * a + out[d] * outA * (1 - a)) / na));
+        out[d + 1] = Math.min(255, Math.round((img.rgba[s + 1] * a + out[d + 1] * outA * (1 - a)) / na));
+        out[d + 2] = Math.min(255, Math.round((img.rgba[s + 2] * a + out[d + 2] * outA * (1 - a)) / na));
+      }
+      out[d + 3] = Math.round(na * 255);
     }
   }
   return { size, rgba: out };
