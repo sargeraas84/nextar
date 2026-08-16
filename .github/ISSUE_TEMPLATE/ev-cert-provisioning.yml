@@ -6,25 +6,27 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this issue to track the full EV-cert path described in
-        [docs/EV-SIGNING.md](../../blob/master/docs/EV-SIGNING.md). The
-        pipeline is already wired — the moment a real PFX lands in the
-        `CODE_SIGN_PFX` / `CODE_SIGN_PFX_PASS` secrets, the next tag push
-        signs and verifies automatically. This issue is the checklist to get
-        there (and the audit trail for the purchase).
+        Use this issue to track getting real code signing in place. The
+        recommended path is **SignPath Foundation — free for open-source
+        projects** (see [docs/SIGNING.md](../../blob/master/docs/SIGNING.md)):
+        set the four `SIGNPATH_*` secrets and the release workflow signs and
+        verifies automatically. The paid paths (DigiCert/Sectigo PFX or
+        Azure Trusted Signing — see [docs/EV-SIGNING.md](../../blob/master/docs/EV-SIGNING.md))
+        are the fallbacks if the free tier is ever insufficient.
 
         The self-signed "Michael Rieger" cert silences the warning only on
-        machines that import it; an EV cert from a public CA makes every
-        Windows machine trust the signature without any import step.
+        machines that import it; a CA-issued cert makes every Windows machine
+        trust the signature without any import step.
   - type: dropdown
     id: provider
     attributes:
       label: Certificate provider
-      description: Which CA are we buying from?
+      description: Which signing provider are we using? (SignPath Foundation is free for open source — see docs/SIGNING.md.)
       options:
-        - DigiCert (recommended — cleanest GitHub Actions path)
-        - Sectigo
-        - Azure Trusted Signing (no PFX — different workflow)
+        - SignPath Foundation (free for open source — recommended)
+        - DigiCert (paid — cleanest PFX path)
+        - Sectigo (paid)
+        - Azure Trusted Signing (paid subscription, no PFX)
         - Undecided — help me choose
     validations:
       required: true

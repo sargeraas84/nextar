@@ -6,14 +6,79 @@ about "unknown publisher" on machines that trust the signing certificate.
 > **For the full purchase → provision → verify walkthrough of a real EV
 > certificate, see [`EV-SIGNING.md`](EV-SIGNING.md).**
 
-There are two tiers:
+There are three tiers:
 
-| Tier | Trusted where | How |
-|------|---------------|-----|
-| Self-signed "Michael Rieger" cert | machines that import the cert | `scripts/sign.ps1` + `scripts/export-signing-cert.ps1` |
-| Real CA cert (recommended for public releases) | everywhere | store as a GitHub secret, release workflow signs automatically |
+| Tier | Cost | Trusted where | How |
+|------|------|---------------|-----|
+| **SignPath Foundation** (recommended for this open-source project) | **free** | everywhere (real CA-issued cert) | apply at signpath.org, set 4 secrets, the release workflow signs automatically |
+| Self-signed "Michael Rieger" cert | free | only machines that import the cert | `scripts/sign.ps1` + `scripts/export-signing-cert.ps1` |
+| Real CA cert (EV/OV) | ~$200–600/yr | everywhere | store as a GitHub secret, release workflow signs automatically |
 
-## 1. Self-signed cert (local builds, this machine)
+## 1. SignPath Foundation — free CA-issued signing (recommended)
+
+[SignPath Foundation](https://signpath.org/) gives **open-source projects a
+free code-signing certificate**. They own the key (it never leaves their
+infrastructure); you upload the unsigned binary, they sign it with their
+Microsoft-trusted cert, and you download the signed file. No smartcard, no
+PFX, no $200–600/yr — and the signatures are real Authenticode that verify
+as `Valid` everywhere, with SmartScreen reputation building as downloads
+accumulate.
+
+### Apply (one-time, human step)
+
+1. Go to <https://signpath.org> → **Apply for Free Code Signing**.
+2. Provide the project's repository URL, the download page URL, and a
+   description. The Foundation reviews that the project is genuinely open
+   source (our repo is public at `github.com/sargeraas84/nextar`), then
+   approves and creates the organization + project in SignPath.
+3. After approval, note the **organization ID**, **project slug**, and
+   **signing policy slug** (shown in your SignPath dashboard).
+4. Create an **API token** in SignPath with submitter permissions on that
+   project/policy. Optionally install the **SignPath GitHub App** and link
+   it to the repo — required only for source-code/build policies; basic
+   signing works without it (their connector still verifies the build ran
+   on GitHub-hosted runners).
+
+### Store the secrets
+
+The `release` workflow's Windows job signs all three exes via the
+`signpath/github-action-submit-signing-request` action **when these four
+secrets are set** (otherwise it falls back to the PFX step, then to
+unsigned):
+
+```powershell
+git secret set SIGNPATH_API_TOKEN <api-token>
+gh secret set SIGNPATH_ORG_ID <organization-id>
+gh secret set SIGNPATH_PROJECT_SLUG <project-slug>
+gh secret set SIGNPATH_SIGNING_POLICY_SLUG <signing-policy-slug>
+```
+
+No private-key secret to protect — the worst an attacker can do with a
+stolen API token is submit signing requests.
+
+### How the workflow uses it
+
+On the next `v*` tag push, the Windows job uploads `nextar.exe`,
+`nextar-gui.exe`, and `nextar-setup.exe` as workflow artifacts, submits a
+signing request for each, waits for completion, downloads the signed
+binaries back into `dist/`, and the **Verify Authenticode signatures** gate
+requires `Get-AuthenticodeSignature` to report `Status: Valid` with a signer
+that is NOT the self-signed `Michael Rieger` fallback — otherwise the
+release is refused.
+
+Verify a published release on any machine:
+
+```powershell
+(Get-AuthenticodeSignature nextar-setup.exe).Status   # Valid
+(Get-AuthenticodeSignature nextar-setup.exe).SignerCertificate.Subject
+```
+
+> Note: SignPath Foundation's free tier is for approved open-source projects
+> with a monthly signature quota — fine for one release per version plus
+> occasional rebuilds. If the project ever goes commercial or the quota
+> becomes limiting, the paid paths below slot in with zero code changes.
+
+## 2. Self-signed cert (local builds, this machine)
 
 `scripts/sign.ps1` creates (once) a `CodeSigningCert` named **Michael Rieger**
 in the current user's store, trusts it in the per-user Trusted Root +
@@ -56,7 +121,7 @@ To make Explorer trust builds on another machine, import the public cert:
 Import-Certificate -FilePath nextar-rieger.cer -CertStoreLocation Cert:\CurrentUser\Root
 ```
 
-## 2. Real CA cert (CI / public releases)
+## 3. Real CA cert (CI / public releases)
 
 For releases that other people download, a real code-signing certificate is
 required — self-signed certs are only trusted where the cert is installed.

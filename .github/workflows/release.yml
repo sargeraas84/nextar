@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: write
+  actions: read # the SignPath action downloads the workflow artifact for signing
 
 jobs:
   # Version bump + tag, only for the manual path. The job always runs (so
@@ -64,6 +65,13 @@ jobs:
     env:
       CODE_SIGN_PFX: ${{ secrets.CODE_SIGN_PFX }}
       CODE_SIGN_PFX_PASS: ${{ secrets.CODE_SIGN_PFX_PASS }}
+      # Free OSS signing via SignPath Foundation (signpath.org): when these
+      # are set, artifacts are signed by SignPath's CA-issued cert instead of
+      # the self-signed/PFX fallback.
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORG_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+      SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -117,38 +125,147 @@ jobs:
           }
           Write-Host "signed 3 artifacts"
 
-      # Gate: when signing was configured, the artifacts MUST carry a valid
-      # Authenticode signature or the release is refused (a silently unsigned
-      # release would defeat the whole point of the step above).
+      # --- Free OSS signing via SignPath Foundation (signpath.org) ---
+      # When the SIGNPATH_* secrets are set, artifacts are signed by
+      # SignPath's CA-issued certificate instead of the self-signed/PFX
+      # fallback: upload each exe as a workflow artifact, submit a signing
+      # request, download the signed file back. No PFX and no private key to
+      # protect - the key never leaves SignPath. Their connector verifies the
+      # build ran on GitHub-hosted runners, which ours does.
+      - name: Upload nextar-setup.exe for SignPath
+        id: upload-setup
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sign-setup
+          path: dist/nextar-setup.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Sign nextar-setup.exe via SignPath
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-setup.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed/setup
+          skip-decompress: true
+
+      - name: Upload nextar-gui.exe for SignPath
+        id: upload-gui
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sign-gui
+          path: dist/nextar-gui.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Sign nextar-gui.exe via SignPath
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-gui.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed/gui
+          skip-decompress: true
+
+      - name: Upload nextar.exe for SignPath
+        id: upload-cli
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sign-cli
+          path: dist/nextar.exe
+          archive: false
+          if-no-files-found: error
+
+      - name: Sign nextar.exe via SignPath
+        if: env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload-cli.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed/cli
+          skip-decompress: true
+
+      - name: Move SignPath-signed binaries into dist
+        if: env.SIGNPATH_API_TOKEN != ''
+        shell: bash
+        run: |
+          cp signed/setup/* dist/nextar-setup.exe
+          cp signed/gui/* dist/nextar-gui.exe
+          cp signed/cli/* dist/nextar.exe
+          ls -la dist/
+
+      # Gate: when signing was configured (SignPath or PFX), the artifacts
+      # MUST carry a valid Authenticode signature or the release is refused
+      # (a silently unsigned release would defeat the whole point of the
+      # step above).
       #
-      # Status nuance: a self-signed cert reports 'UnknownError' on a runner
-      # that doesn't have it in the root store - that is a trust-chain
-      # status, NOT a broken signature. What proves the signature is intact
-      # is (a) the signer thumbprint matching the cert we just imported and
-      # (b) status NOT being NotSigned/HashMismatch (the two statuses that
-      # mean the signature itself is absent or corrupt).
+      # SignPath path: their CA-issued cert is trusted on Windows runners,
+      # so Status must be Valid, and the signer must NOT be the self-signed
+      # 'Michael Rieger' fallback cert (which would mean the SignPath step
+      # silently didn't run).
+      #
+      # PFX path nuance: a self-signed cert reports 'UnknownError' on a
+      # runner that doesn't have it in the root store - that is a
+      # trust-chain status, NOT a broken signature. What proves the
+      # signature is intact is (a) the signer thumbprint matching the cert
+      # we just imported and (b) status NOT being NotSigned/HashMismatch
+      # (the two statuses that mean the signature itself is absent or
+      # corrupt).
       - name: Verify Authenticode signatures
-        if: env.CODE_SIGN_PFX != ''
+        if: env.CODE_SIGN_PFX != '' || env.SIGNPATH_API_TOKEN != ''
         shell: pwsh
         run: |
-          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODE_SIGN_PFX))
-          $pwd = ConvertTo-SecureString -String $env:CODE_SIGN_PFX_PASS -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pwd
-          $bad = @()
-          foreach ($f in @("dist\nextar.exe", "dist\nextar-gui.exe", "dist\nextar-setup.exe")) {
-            $sig = Get-AuthenticodeSignature $f
-            $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { 'unsigned' }
-            $thumb = if ($sig.SignerCertificate) { $sig.SignerCertificate.Thumbprint } else { 'none' }
-            Write-Host ("{0}: {1} ({2}) thumb {3}" -f $f, $sig.Status, $subject, $thumb)
-            $broken = $sig.Status -in @('NotSigned', 'HashMismatch', 'NotTrusted', 'Invalid')
-            if ($broken -or $thumb -ne $cert.Thumbprint) { $bad += $f }
+          $useSignPath = $env:SIGNPATH_API_TOKEN -ne ''
+          if ($useSignPath) {
+            $bad = @()
+            foreach ($f in @("dist\nextar.exe", "dist\nextar-gui.exe", "dist\nextar-setup.exe")) {
+              $sig = Get-AuthenticodeSignature $f
+              $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { 'unsigned' }
+              Write-Host ("{0}: {1} ({2})" -f $f, $sig.Status, $subject)
+              if ($sig.Status -ne 'Valid') { $bad += $f }
+              elseif ($subject -like '*Michael Rieger*') { $bad += $f }
+            }
+            if ($bad.Count -gt 0) {
+              Write-Error ("unsigned/invalid artifacts (SignPath): " + ($bad -join ', '))
+              exit 1
+            }
+            Write-Host "all 3 artifacts carry Valid SignPath signatures"
+          } else {
+            $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODE_SIGN_PFX))
+            $pwd = ConvertTo-SecureString -String $env:CODE_SIGN_PFX_PASS -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pwd
+            $bad = @()
+            foreach ($f in @("dist\nextar.exe", "dist\nextar-gui.exe", "dist\nextar-setup.exe")) {
+              $sig = Get-AuthenticodeSignature $f
+              $subject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { 'unsigned' }
+              $thumb = if ($sig.SignerCertificate) { $sig.SignerCertificate.Thumbprint } else { 'none' }
+              Write-Host ("{0}: {1} ({2}) thumb {3}" -f $f, $sig.Status, $subject, $thumb)
+              $broken = $sig.Status -in @('NotSigned', 'HashMismatch', 'NotTrusted', 'Invalid')
+              if ($broken -or $thumb -ne $cert.Thumbprint) { $bad += $f }
+            }
+            if ($bad.Count -gt 0) {
+              Write-Error ("unsigned/invalid artifacts: " + ($bad -join ', '))
+              exit 1
+            }
+            Write-Host "all 3 artifacts carry valid Authenticode signatures (signer thumbprint matches imported cert)"
           }
-          if ($bad.Count -gt 0) {
-            Write-Error ("unsigned/invalid artifacts: " + ($bad -join ', '))
-            exit 1
-          }
-          Write-Host "all 3 artifacts carry valid Authenticode signatures (signer thumbprint matches imported cert)"
 
       # Release gate: the full installer lifecycle must pass before the
       # artifacts are attached to the release.

@@ -1,5 +1,14 @@
 # Provisioning a real EV code-signing certificate
 
+> **Before buying anything: this is an open-source project, so check the
+> free path first.** [SignPath Foundation](SIGNING.md#1-signpath-foundation--free-ca-issued-signing-recommended)
+> gives approved OSS projects a CA-issued code-signing certificate at **$0**
+> — no purchase, no smartcard, no private-key secrets. The whole pipeline is
+> already wired for it; you only need to apply and set four secrets. This
+> document is the **paid** fallback (for commercial licensing, when the free
+> tier's signature quota is insufficient, or if the Foundation application
+> is declined).
+
 This is the end-to-end path from "no cert" to "releases show **Verified
 publisher: Michael Rieger** everywhere". The self-signed cert in
 [`SIGNING.md`](SIGNING.md) silences the warning only on machines that import
