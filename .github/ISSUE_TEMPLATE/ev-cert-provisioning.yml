@@ -1,0 +1,100 @@
+name: EV code-signing certificate provisioning
+description: Track purchasing and provisioning a real EV code-signing certificate so released builds show "Verified publisher" everywhere.
+title: "EV code-signing cert: <provider>"
+labels: [signing, release, security]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this issue to track the full EV-cert path described in
+        [docs/EV-SIGNING.md](../../blob/master/docs/EV-SIGNING.md). The
+        pipeline is already wired — the moment a real PFX lands in the
+        `CODE_SIGN_PFX` / `CODE_SIGN_PFX_PASS` secrets, the next tag push
+        signs and verifies automatically. This issue is the checklist to get
+        there (and the audit trail for the purchase).
+
+        The self-signed "Michael Rieger" cert silences the warning only on
+        machines that import it; an EV cert from a public CA makes every
+        Windows machine trust the signature without any import step.
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Certificate provider
+      description: Which CA are we buying from?
+      options:
+        - DigiCert (recommended — cleanest GitHub Actions path)
+        - Sectigo
+        - Azure Trusted Signing (no PFX — different workflow)
+        - Undecided — help me choose
+    validations:
+      required: true
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites (have these ready before ordering)
+      description: See "What you need before ordering" in docs/EV-SIGNING.md.
+      options:
+        - label: Legal name decided (exactly as it will appear on the cert)
+        - label: Organization / address decided (or individual cert confirmed OK)
+        - label: Phone + email ready for the CA call-back verification
+        - label: Key storage chosen (DigiCert Signing Manager / Key Vault, Sectigo software key, or USB token)
+        - label: Budget approved (~$200–600/yr) and purchase card ready
+  - type: input
+    id: order
+    attributes:
+      label: Order reference
+      description: CA order number / account once the purchase is placed.
+      placeholder: "e.g. DIGICERT-123456 or Sectigo order #"
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Identity verification
+      description: The CA must verify you are a real person/org (usually 1–3 business days).
+      options:
+        - label: Verification call-back completed
+        - label: Supporting documents submitted
+        - label: Cert issued (note the issue date below)
+  - type: input
+    id: issued
+    attributes:
+      label: Cert issued on
+      placeholder: "YYYY-MM-DD"
+  - type: checkboxes
+    id: pfx
+    attributes:
+      label: PFX export
+      description: Software-key certs must be exported as a password-protected PFX with the private key.
+      options:
+        - label: PFX exported / downloaded
+        - label: Verified `HasPrivateKey` is True (see docs/EV-SIGNING.md step 3)
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: GitHub secrets
+      description: The release workflow signs automatically once both secrets exist.
+      options:
+        - label: "`CODE_SIGN_PFX` set (base64 of the PFX)"
+        - label: "`CODE_SIGN_PFX_PASS` set (the PFX password)"
+        - label: Confirmed via `gh secret list` (values masked in logs)
+  - type: checkboxes
+    id: cut-release
+    attributes:
+      label: Cut a release and verify
+      options:
+        - label: Tag pushed (e.g. v0.3.0) and Windows job code-signed + signature-verify step passed
+        - label: "Downloaded shipped installer shows `Status: Valid` with the real subject"
+        - label: Verified on a CLEAN machine (no cert imported) — SmartScreen shows "Verified publisher"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / blockers
+      description: Anything that stalled the process (verification delays, hardware-token issues, cost overruns) so the next purchase goes faster.
+    validations:
+      required: false
+  - type: markdown
+    attributes:
+      value: |
+        **Rotation reminder:** on renewal, re-run the two `gh secret set`
+        commands with the new PFX and cut a fresh release. If the key is ever
+        compromised, revoke in the CA portal immediately, then re-set the
+        secrets. Never commit the PFX or its password (`*.pfx` is gitignored).

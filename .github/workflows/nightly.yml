@@ -267,3 +267,21 @@ jobs:
           [ "$EXE_BODY" = "$EXE_EXPECTED" ] || { echo "::error::release body nextar-setup.exe checksum mismatch (badge would lie)"; exit 1; }
           [ "$DMG_BODY" = "$DMG_EXPECTED" ] || { echo "::error::release body nextar-macos.dmg checksum mismatch (badge would lie)"; exit 1; }
           echo "✅ nightly release verified: downloads 200, served + body checksums match"
+
+  # Daily staleness gate for the landing page's STABLE download card. The
+  # card is pinned to a versioned release (STABLE_TAG in site/index.html);
+  # if someone cuts a new stable release and forgets to bump the card, or a
+  # pinned release is deleted / loses its checksum body, this fails the
+  # nightly run so the badge can never silently go stale. Runs against the
+  # DEPLOYED page (GitHub Pages), so it also catches a broken Pages deploy.
+  stable-card-check:
+    runs-on: ubuntu-latest
+    needs: [publish]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the deployed stable card is fresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/check-stable-card.js
