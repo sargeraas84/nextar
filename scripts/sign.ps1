@@ -32,6 +32,49 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Run a process with a hard timeout (seconds) and kill it if it exceeds it,
+# so a wedged signtool (e.g. an unreachable timestamp server) can never hang
+# a build forever. Returns the exit code.
+function Invoke-WithTimeout {
+    param(
+        [string]$FilePath,
+        [string[]]$Arguments,
+        [int]$TimeoutSeconds = 120
+    )
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    # .NET Framework (Windows PowerShell 5.1) has no ArgumentList; build the
+    # command line manually with quoting instead. .NET Core+ (pwsh) can use
+    # ArgumentList, which quotes automatically.
+    if ($psi.ArgumentList) {
+        foreach ($a in $Arguments) { [void]$psi.ArgumentList.Add($a) }
+    } else {
+        # PowerShell single-quoted strings do NOT process backslash escapes:
+        # the quote character is '"' with NO backslash. Use [char]34 to build
+        # the quoted argument list portably.
+        # String.Replace is literal (no regex) and avoids -replace's operator
+        # parsing; [char]34 is the double-quote, [char]92 the backslash.
+        $q = $Arguments | ForEach-Object {
+            $esc = $_.Replace([string][char]34, [string][char]92 + [string][char]34)
+            [string][char]34 + $esc + [string][char]34
+        }
+        $psi.Arguments = $q -join ' '
+    }
+    $p = [System.Diagnostics.Process]::Start($psi)
+    if (-not $p.WaitForExit($TimeoutSeconds * 1000)) {
+        try { $p.Kill() } catch {}
+        throw "timed out after ${TimeoutSeconds}s: $FilePath $($Arguments -join ' ')"
+    }
+    $out = $p.StandardOutput.ReadToEnd()
+    $err = $p.StandardError.ReadToEnd()
+    if ($out) { Write-Host $out }
+    if ($err) { Write-Host $err }
+    return $p.ExitCode
+}
+
 # Locate signtool from the newest Windows SDK kit.
 $kits = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match '^\d+\.' } |
@@ -90,8 +133,9 @@ if ($existing) { $cert = $existing }
 foreach ($p in $Paths | Select-Object -Unique) {
     if (-not (Test-Path $p)) { Write-Host "skip (missing): $p"; continue }
     Write-Host "Signing: $p"
-    & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint /tr $TimestampUrl /td SHA256 $p
-    if ($LASTEXITCODE -ne 0) { throw "signtool failed for $p" }
+    $args = @("sign", "/fd", "SHA256", "/sha1", $cert.Thumbprint, "/tr", $TimestampUrl, "/td", "SHA256", $p)
+    $rc = Invoke-WithTimeout -FilePath $signtool -Arguments $args -TimeoutSeconds 120
+    if ($rc -ne 0) { throw "signtool failed for $p (exit $rc)" }
 }
 
 Write-Host ""

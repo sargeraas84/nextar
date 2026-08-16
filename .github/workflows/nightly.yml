@@ -55,8 +55,12 @@ jobs:
           grep -h '^test result:' "$RUNNER_TEMP/tests.log" | sed 's/^test result: //' > summary-windows.txt
           cat summary-windows.txt
 
+      # Timeout: package.sh historically hung on the (now CI-skipped) signing
+      # step; the cap turns any future hang into a visible failure instead of
+      # a 6h runner bill.
       - name: Build installer distribution
         shell: bash
+        timeout-minutes: 40
         run: bash scripts/package.sh
 
       - name: Checksum the installer

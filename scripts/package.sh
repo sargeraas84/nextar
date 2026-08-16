@@ -25,7 +25,12 @@ cp setup/target/release/nextar-setup.exe dist/
 # Sign the payload with the Michael Rieger code-signing cert when available
 # (scripts/sign.ps1 creates it on first run). Best effort: if signtool or the
 # cert is missing, the build still succeeds — signing is a distribution nicety.
-if command -v powershell >/dev/null 2>&1; then
+#
+# CI (GitHub Actions sets CI=true) does NOT sign here: the release workflow
+# signs with a real cert via secrets, and sign.ps1's self-signed-cert creation
+# + signtool timestamp calls hang on GitHub Windows runners (observed: jobs
+# wedged 2h+ on the package.sh step). Local packaging signs normally.
+if [ "${CI:-}" != "true" ] && command -v powershell >/dev/null 2>&1; then
     echo "==> signing dist/ payload (best effort)"
     # sign.ps1's default path list covers target/release + dist/.
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign.ps1 2>&1 | sed 's/^/    /' || echo "    (signing skipped - install Windows SDK signtool or run scripts/sign.ps1)"

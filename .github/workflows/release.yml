@@ -80,8 +80,12 @@ jobs:
           cargo test
           cargo test --manifest-path setup/Cargo.toml
 
+      # Timeout: package.sh historically hung on the (now CI-skipped) signing
+      # step; the cap turns any future hang into a visible failure instead of
+      # a 6h runner bill.
       - name: Build installer distribution
         shell: bash
+        timeout-minutes: 40
         run: bash scripts/package.sh
 
       # Code-sign the payload when a signing cert is configured. The cert must
@@ -92,6 +96,7 @@ jobs:
       - name: Code-sign installer and binaries
         if: env.CODE_SIGN_PFX != ''
         shell: pwsh
+        timeout-minutes: 15
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODE_SIGN_PFX))
