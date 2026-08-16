@@ -754,7 +754,27 @@
             <h3>Stable · v0.2.0</h3>
             <p class="ver">pinned release — both platforms</p>
             <p>Versioned builds ship code-signed on Windows when signing is configured, and both installers pass the full install → upgrade → uninstall E2E before releasing. Pick the pinned version when you want a fixed release, or the rolling nightly above for the newest master build.</p>
-            <span class="live-badge"><span class="dot"></span><span class="bt">v0.2.0 · stable</span></span>
+            <span class="live-badge" data-stable-badge="nextar-setup.exe"><span class="dot"></span><span class="bt">checking v0.2.0…</span></span>
+            <div class="verify reveal" data-stable-verify="nextar-setup.exe" style="--d:.2s">
+              <div class="verify-head">
+                <span class="verify-lbl">SHA-256</span>
+                <button class="copy-btn" type="button" disabled aria-label="Copy checksum">
+                  <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
+                </button>
+              </div>
+              <code class="verify-hash">checking v0.2.0…</code>
+              <p class="verify-cmd">verify with <code>Get-FileHash nextar-setup.exe -Algorithm SHA256</code></p>
+            </div>
+            <div class="verify reveal" data-stable-verify="nextar-macos.dmg" style="--d:.24s">
+              <div class="verify-head">
+                <span class="verify-lbl">SHA-256</span>
+                <button class="copy-btn" type="button" disabled aria-label="Copy checksum">
+                  <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
+                </button>
+              </div>
+              <code class="verify-hash">checking v0.2.0…</code>
+              <p class="verify-cmd">verify with <code>shasum -a 256 nextar-0.2.0-macos.dmg</code></p>
+            </div>
             <div style="margin-top:28px;display:flex;gap:10px;flex-wrap:wrap">
               <a class="btn btn-primary" href="#" data-stable-download="nextar-setup.exe">
                 Windows installer
@@ -988,6 +1008,67 @@
       document.querySelectorAll('[data-verify]').forEach(function(v){
         var code = v.querySelector('.verify-hash');
         if(code) code.textContent = 'unavailable — no nightly build yet';
+      });
+    });
+  }
+
+  // Stable release channel: read the pinned v0.2.0 release (tag from
+  // STABLE_TAG above) and paint its live badge + SHA-256 checksums the same
+  // way the nightly cards work. The stable dmg is versioned in the asset
+  // name (nextar-0.2.0-macos.dmg) but the body/verify keys use the plain
+  // card names, so map keys to release asset names when looking up sizes.
+  var stableBadges = document.querySelectorAll('[data-stable-badge]');
+  var stableVerifies = document.querySelectorAll('[data-stable-verify]');
+  if (local) {
+    stableBadges.forEach(function(el){
+      var key = el.getAttribute('data-stable-badge');
+      paintBadge(el, LOCAL_ASSETS[key] ? 'local build · dist/' : 'CI-only · CI build', false);
+    });
+    stableVerifies.forEach(function(v){
+      var key = v.getAttribute('data-stable-verify');
+      var code = v.querySelector('.verify-hash');
+      if(code) code.textContent = LOCAL_ASSETS[key]
+        ? 'local build — verify from dist/ directly'
+        : 'built by CI — no local copy';
+    });
+  } else {
+    fetch('https://api.github.com/repos/' + REPO + '/releases/tags/' + STABLE_TAG)
+    .then(function(r){ if(!r.ok) throw new Error('http ' + r.status); return r.json(); })
+    .then(function(rel){
+      var body = rel.body || '';
+      function esc(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+      function csFor(name){
+        var m = body.match(new RegExp(esc(name) + '\\s*:\\s*([0-9a-f]{64})'));
+        return m ? m[1] : '';
+      }
+      var assets = {};
+      (rel.assets || []).forEach(function(a){ assets[a.name] = a; });
+      stableBadges.forEach(function(el){
+        var key = el.getAttribute('data-stable-badge');
+        var asset = assets[STABLE_ASSETS[key]];
+        var bits = [];
+        if(asset && asset.size) bits.push(fmtSize(asset.size));
+        if(asset && asset.updated_at) bits.push(timeAgo(asset.updated_at));
+        paintBadge(el, STABLE_TAG + (bits.length ? ' · ' + bits.join(' · ') : ''), true);
+        var cs = csFor(STABLE_ASSETS[key] || key);
+        if(cs) el.title = 'SHA-256: ' + cs;
+      });
+      stableVerifies.forEach(function(v){
+        var key = v.getAttribute('data-stable-verify');
+        var code = v.querySelector('.verify-hash');
+        var btn = v.querySelector('.copy-btn');
+        // The body lists the dmg under its versioned asset name, so resolve
+        // the checksum by the mapped asset name, not the card key.
+        var cs = csFor(STABLE_ASSETS[key] || key);
+        if(code) code.textContent = cs ? cs : 'no checksum in release body';
+        if(btn && cs) btn.disabled = false;
+      });
+    })
+    .catch(function(){
+      stableBadges.forEach(function(el){ paintBadge(el, STABLE_TAG, false); });
+      stableVerifies.forEach(function(v){
+        var code = v.querySelector('.verify-hash');
+        if(code) code.textContent = 'unavailable — stable release not found';
       });
     });
   }

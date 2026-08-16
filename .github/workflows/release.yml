@@ -206,22 +206,46 @@ jobs:
           name: macos-dmg
           path: assets/
 
+      # Compute SHA-256 for every artifact and assemble the release body with
+      # the checksums appended (same `name: <sha>` lines the nightly body
+      # carries), so the landing page's stable card can show and verify them
+      # exactly like the nightly cards do.
+      - name: Checksum artifacts and assemble release body
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG=$(ls assets/nextar-*.dmg)
+          WIN_SHA=$(sha256sum assets/nextar-setup.exe | awk '{print $1}')
+          GUI_SHA=$(sha256sum assets/nextar-gui.exe | awk '{print $1}')
+          CLI_SHA=$(sha256sum assets/nextar.exe | awk '{print $1}')
+          DMG_SHA=$(sha256sum "$DMG" | awk '{print $1}')
+          cat > body.md <<EOF
+          Created by **Michael Rieger** — a next-generation archiver built to dethrone WinRAR and 7-Zip.
+
+          **Highlights**
+          - ⚡ Zstd (fast) + LZMA2 (ultra) compression
+          - 🔐 Argon2id + XChaCha20-Poly1305 authenticated encryption
+          - 🛡️ Reed-Solomon recovery volumes (self-healing archives)
+          - 🧵 Fully multi-threaded read → compress → encrypt → write pipeline
+          - 🖥️ GUI with drag-and-drop, live progress, and Windows Explorer shell integration
+
+          **Installer** — the Windows setup wizard (with a macOS .dmg) bundles both the CLI and the GUI. Full install → upgrade → uninstall lifecycle is verified in CI before shipping.
+
+          **Checksums (SHA-256)**
+          - nextar-setup.exe: ${WIN_SHA}
+          - nextar-gui.exe: ${GUI_SHA}
+          - nextar.exe: ${CLI_SHA}
+          - $(basename "$DMG"): ${DMG_SHA}
+          EOF
+          echo "--- body.md ---"
+          cat body.md
+
       - name: Create GitHub release with artifacts
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
           name: nextar ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
-          body: |
-            Created by **Michael Rieger** — a next-generation archiver built to dethrone WinRAR and 7-Zip.
-
-            **Highlights**
-            - ⚡ Zstd (fast) + LZMA2 (ultra) compression
-            - 🔐 Argon2id + XChaCha20-Poly1305 authenticated encryption
-            - 🛡️ Reed-Solomon recovery volumes (self-healing archives)
-            - 🧵 Fully multi-threaded read → compress → encrypt → write pipeline
-            - 🖥️ GUI with drag-and-drop, live progress, and Windows Explorer shell integration
-
-            **Installer** — the Windows setup wizard (with a macOS .dmg) bundles both the CLI and the GUI. Full install → upgrade → uninstall lifecycle is verified in CI before shipping.
+          body_path: ${{ github.workspace }}/body.md
           generate_release_notes: true
           # Never silently ship an empty release: fail loudly if any expected
           # artifact is missing from the download step.

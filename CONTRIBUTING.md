@@ -65,6 +65,31 @@ The `prepare` job updates the version in `Cargo.toml`, `setup/Cargo.toml`,
 and the `VERSION` constant in `setup/src/main.rs` — keep all three in sync
 when bumping by hand.
 
+### Moving a tag after a fix (used for v0.2.0)
+
+The tag-push trigger builds the workflow code **at the tagged commit** — a
+release whose build fails needs its tag moved to the fix commit and
+re-pushed, not just a master push (master pushes don't retrigger `release`).
+This is safe **only if no release exists yet** for that tag (check with
+`gh release view <tag>`; if it 404s, move it):
+
+```bash
+# 1. push the fix to master (also re-triggers nightly)
+git push origin master
+# 2. delete + recreate the tag at the fix commit
+git tag -d v0.2.0
+git push origin :refs/tags/v0.2.0
+git tag v0.2.0 <fix-sha>
+git push origin v0.2.0
+# 3. watch the fresh release run
+git rev-parse v0.2.0   # confirm it points at the fix
+gh run list --workflow=release.yml --limit 1
+```
+
+During v0.2.0 this moved the tag three times (CI hang → signing locator →
+signature gate) until the release went green. If a release **already exists**
+at that tag, do NOT move it — cut a new patch tag (e.g. `v0.2.1`) instead.
+
 ## Branch protection
 
 Merging to `master` should require CI. Branch protection is a repository
