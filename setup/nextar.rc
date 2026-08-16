@@ -17,11 +17,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Michael Rieger"
             VALUE "FileDescription", "nextar installer"
-            VALUE "FileVersion", "0.2.1"
+            VALUE "FileVersion", "0.3.0"
             VALUE "InternalName", "nextar-setup"
             VALUE "LegalCopyright", "(c) 2026 Michael Rieger"
             VALUE "ProductName", "nextar"
-            VALUE "ProductVersion", "0.2.1"
+            VALUE "ProductVersion", "0.3.0"
         END
     END
     BLOCK "VarFileInfo"

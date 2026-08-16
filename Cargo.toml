@@ -1,6 +1,6 @@
 [package]
 name = "nextar"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 authors = ["Michael Rieger"]
 description = "Next-generation archiver: Zstd/LZMA2 compression, Argon2id + XChaCha20-Poly1305 encryption, Reed-Solomon recovery volumes, fully parallel pipeline"
