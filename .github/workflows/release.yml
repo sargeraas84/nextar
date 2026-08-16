@@ -140,6 +140,17 @@ jobs:
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
           name: nextar ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
+          body: |
+            Created by **Michael Rieger** — a next-generation archiver built to dethrone WinRAR and 7-Zip.
+
+            **Highlights**
+            - ⚡ Zstd (fast) + LZMA2 (ultra) compression
+            - 🔐 Argon2id + XChaCha20-Poly1305 authenticated encryption
+            - 🛡️ Reed-Solomon recovery volumes (self-healing archives)
+            - 🧵 Fully multi-threaded read → compress → encrypt → write pipeline
+            - 🖥️ GUI with drag-and-drop, live progress, and Windows Explorer shell integration
+
+            **Installer** — the Windows setup wizard (with a macOS .dmg) bundles both the CLI and the GUI. Full install → upgrade → uninstall lifecycle is verified in CI before shipping.
           generate_release_notes: true
           # Never silently ship an empty release: fail loudly if any expected
           # artifact is missing from the download step.
