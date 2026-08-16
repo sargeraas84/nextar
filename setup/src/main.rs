@@ -36,7 +36,7 @@ use winreg::RegKey;
 
 use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, Vec2};
 
-const VERSION: &str = "0.1.0";
+const VERSION: &str = "0.2.0";
 const NEXAR_EXE: &[u8] = include_bytes!("../../target/release/nextar.exe");
 const GUI_EXE: &[u8] = include_bytes!("../../target/release/nextar-gui.exe");
 

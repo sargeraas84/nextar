@@ -2599,7 +2599,7 @@ impl GuiApp {
             ui.add_space(6.0);
             ui.vertical(|ui| {
                 ui.label(grad_text("NEXTAR", 18.0, true));
-                ui.label(RichText::new("v0.1.0").size(10.0).color(text3()));
+                ui.label(RichText::new(env!("CARGO_PKG_VERSION")).size(10.0).color(text3()));
                 ui.label(RichText::new("by Michael Rieger").size(9.0).color(text3()));
             });
         });
@@ -3682,7 +3682,12 @@ impl GuiApp {
                     draw_logo(ui, 40.0);
                     ui.add_space(10.0);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("nextar v0.1.0").size(13.5).strong().color(text()));
+                        ui.label(
+                            RichText::new(format!("nextar v{}", env!("CARGO_PKG_VERSION")))
+                                .size(13.5)
+                                .strong()
+                                .color(text()),
+                        );
                         ui.label(RichText::new("Created by Michael Rieger").size(12.0).color(text2()));
                         ui.label(
                             RichText::new("zstd · lzma2 · argon2id · xchacha20-poly1305 · reed-solomon")
