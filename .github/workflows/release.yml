@@ -103,7 +103,9 @@ jobs:
           $pwd = ConvertTo-SecureString -String $env:CODE_SIGN_PFX_PASS -AsPlainText -Force
           $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pwd
           Write-Host "imported cert: $($cert.Subject) thumbprint $($cert.Thumbprint)"
+          # Only numeric SDK version dirs (arm64/arm breaks the [version] cast).
           $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
+            Where-Object { $_.Name -match '^\d+\.' } |
             Sort-Object { [version]$_.Name } -Descending |
             ForEach-Object { Join-Path $_.FullName "x64\signtool.exe" } |
             Where-Object { Test-Path $_ } |
