@@ -2,6 +2,8 @@
 
 **A next-generation archiver: fast, secure, self-healing.**
 
+Created by **Michael Rieger**.
+
 `nextar` is a from-scratch Rust archiver designed to take on WinRAR and 7-Zip.
 It combines the best modern open-source technologies:
 

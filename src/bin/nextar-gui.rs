@@ -2600,6 +2600,7 @@ impl GuiApp {
             ui.vertical(|ui| {
                 ui.label(grad_text("NEXTAR", 18.0, true));
                 ui.label(RichText::new("v0.1.0").size(10.0).color(text3()));
+                ui.label(RichText::new("by Michael Rieger").size(9.0).color(text3()));
             });
         });
         ui.add_space(20.0);
@@ -2684,6 +2685,7 @@ impl GuiApp {
                     draw_wordmark_stagger(ui, t, word_s);
                     ui.add_space(2.0);
                     ui.label(RichText::new("fast · secure · self-healing archives").size(tag_s).color(text2()));
+                    ui.label(RichText::new("by Michael Rieger").size(tag_s - 1.5).color(text3()));
                 });
             });
             ui.add_space(14.0);
@@ -3666,6 +3668,30 @@ impl GuiApp {
                 .size(11.0)
                 .color(text3()),
         );
+        ui.add_space(16.0);
+        // About: creator credit + stack summary, in the same card language
+        // as the rest of the view.
+        egui::Frame::new()
+            .fill(bg2())
+            .stroke(Stroke::new(1.0, border()))
+            .corner_radius(CornerRadius::same(12))
+            .inner_margin(Margin::same(14))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    draw_logo(ui, 40.0);
+                    ui.add_space(10.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("nextar v0.1.0").size(13.5).strong().color(text()));
+                        ui.label(RichText::new("Created by Michael Rieger").size(12.0).color(text2()));
+                        ui.label(
+                            RichText::new("zstd · lzma2 · argon2id · xchacha20-poly1305 · reed-solomon")
+                                .size(11.0)
+                                .color(text3()),
+                        );
+                    });
+                });
+            });
     }
 
     fn save_create_defaults(&self) {
@@ -4655,6 +4681,13 @@ fn draw_splash_scene(ctx: &egui::Context, t: f32) {
         "fast · secure · self-healing",
         egui::FontId::proportional(12.0),
         alpha(text2(), a),
+    );
+    p.text(
+        egui::pos2(cx, logo_rect.bottom() + 60.0),
+        egui::Align2::CENTER_CENTER,
+        "by Michael Rieger",
+        egui::FontId::proportional(10.0),
+        alpha(text3(), a),
     );
 
     // glass boot bar with a gradient fill

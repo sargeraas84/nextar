@@ -2,6 +2,7 @@
 name = "nextar-setup"
 version = "0.1.0"
 edition = "2021"
+authors = ["Michael Rieger"]
 description = "nextar installer: bundles nextar.exe + nextar-gui.exe and registers Explorer shell integration"
 build = "build.rs"
 

@@ -21,7 +21,8 @@ use nextar::recovery::DEFAULT_SEGMENT_SIZE;
     about = "A next-generation archiver: fast, secure, self-healing",
     long_about = "nextar — a next-generation archiver that aims to outperform WinRAR and 7-Zip.\n\
                   Zstd (fast) and LZMA2 (ultra) compression, Argon2id + XChaCha20-Poly1305\n\
-                  encryption, Reed-Solomon recovery volumes, fully multi-threaded."
+                  encryption, Reed-Solomon recovery volumes, fully multi-threaded.\n\
+                  Created by Michael Rieger."
 )]
 struct Cli {
     /// Disable colored output (also honors the NO_COLOR env var)

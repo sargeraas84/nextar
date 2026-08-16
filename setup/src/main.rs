@@ -47,9 +47,10 @@ NEXTAR END-USER LICENSE AGREEMENT
 Version 1.0 — August 15, 2026
 
 This End-User License Agreement (\"Agreement\") is a legal agreement between
-you (an individual or a single entity) and the nextar project (\"nextar\",
-\"we\", or \"us\") governing your use of the nextar software, including its
-installer, documentation, and accompanying components (the \"Software\").
+you (an individual or a single entity) and Michael Rieger, the creator of
+nextar (\"nextar\", \"we\", or \"us\") governing your use of the nextar
+software, including its installer, documentation, and accompanying
+components (the \"Software\").
 By installing, copying, or otherwise using the Software, you agree to be
 bound by this Agreement. If you do not agree, do not install or use the
 Software.
@@ -63,9 +64,9 @@ purposes only.
 
 2. Ownership.
 The Software, including its code, user interface, logos, trademarks, and
-documentation, is owned by nextar and protected by copyright and other
-intellectual property laws. This Agreement grants a license to use the
-Software; it does not transfer ownership.
+documentation, is owned by Michael Rieger (creator of nextar) and protected
+by copyright and other intellectual property laws. This Agreement grants a
+license to use the Software; it does not transfer ownership.
 
 3. Open-Source Components.
 The Software incorporates compression, cryptography, and error-correction
@@ -596,7 +597,7 @@ fn install_actions(prefix: &Path, opts: &InstallOpts, no_shell: bool) -> Result<
     acts.push(Act::SetDword { root: Root::Uninstall, path: "nextar".into(), name: "EstimatedSize".into(), value: est_size });
     acts.push(Act::Set { root: Root::Uninstall, path: "nextar".into(), name: "DisplayName".into(), value: "nextar".into() });
     acts.push(Act::Set { root: Root::Uninstall, path: "nextar".into(), name: "DisplayVersion".into(), value: VERSION.into() });
-    acts.push(Act::Set { root: Root::Uninstall, path: "nextar".into(), name: "Publisher".into(), value: "nextar".into() });
+    acts.push(Act::Set { root: Root::Uninstall, path: "nextar".into(), name: "Publisher".into(), value: "Michael Rieger".into() });
     acts.push(Act::Set { root: Root::Uninstall, path: "nextar".into(), name: "InstallLocation".into(), value: prefix.display().to_string() });
     acts.push(Act::Set { root: Root::Uninstall, path: "nextar".into(), name: "DisplayIcon".into(), value: icon.clone() });
     acts.push(Act::Set { root: Root::Uninstall, path: "nextar".into(), name: "UninstallString".into(), value: format!("\"{}\" --uninstall", setup.display()) });
@@ -1771,6 +1772,7 @@ impl eframe::App for Wizard {
                     ui.add_space(6.0);
                     ui.label(grad_text("NEXTAR", 24.0, true));
                     ui.label(RichText::new(format!("setup v{VERSION}")).size(12.0).color(text3()));
+                    ui.label(RichText::new("by Michael Rieger").size(10.0).color(text3()));
                 });
             });
             ui.add_space(8.0);
