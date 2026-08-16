@@ -20,6 +20,12 @@ param(
   [string]$Seed = ""
 )
 
+# Pin the DARK theme for captures. CI runners default to Windows LIGHT
+# mode, which would otherwise produce light-themed gallery shots; the
+# NEXTAR_LOGO_THEME env pin is the app's documented dev/CI override and
+# beats both the registry and the Follow setting.
+$env:NEXTAR_LOGO_THEME = "dark"
+
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
