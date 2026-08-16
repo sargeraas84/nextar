@@ -3,6 +3,9 @@
 nextar ships with an optional code-signing setup so Windows stops warning
 about "unknown publisher" on machines that trust the signing certificate.
 
+> **For the full purchase → provision → verify walkthrough of a real EV
+> certificate, see [`EV-SIGNING.md`](EV-SIGNING.md).**
+
 There are two tiers:
 
 | Tier | Trusted where | How |

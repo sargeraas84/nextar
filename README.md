@@ -313,7 +313,10 @@ runs the same E2E before attaching artifacts. To also block direct pushes to
 
 See **`docs/FORMAT.md`** for the complete binary layout of the `.NEXT`
 archive and `.nvol` volume, and **`docs/ARCHITECTURE.md`** for the module
-breakdown, pipeline design and threat model.
+breakdown, pipeline design and threat model. Windows code-signing is
+documented in **`docs/SIGNING.md`** (self-signed + CI secrets) and
+**`docs/EV-SIGNING.md`** (purchasing and provisioning a real EV
+certificate so releases show a verified publisher).
 
 ## Scheduled builds & release health
 
