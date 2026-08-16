@@ -17,11 +17,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Michael Rieger"
             VALUE "FileDescription", "nextar — next-generation archiver"
-            VALUE "FileVersion", "0.3.0"
+            VALUE "FileVersion", "0.3.1"
             VALUE "InternalName", "nextar"
             VALUE "LegalCopyright", "(c) 2026 Michael Rieger"
             VALUE "ProductName", "nextar"
-            VALUE "ProductVersion", "0.3.0"
+            VALUE "ProductVersion", "0.3.1"
         END
     END
     BLOCK "VarFileInfo"
