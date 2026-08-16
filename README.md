@@ -31,6 +31,10 @@ $ nextar repair damaged.next --volumes photos.next.nvol
 
 _Screenshots refresh automatically every night from the nightly build._
 
+| Splash | Installer |
+|---|---|
+| ![Splash](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-splash.png) | ![Installer](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-wizard.png) |
+
 ![Home](https://github.com/sargeraas84/nextar/releases/download/nightly/nextar-home.png)
 
 | Create | Extract | Inspect |

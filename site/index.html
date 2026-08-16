@@ -1144,14 +1144,14 @@
       .then(function(r){ if(!r.ok) throw new Error('http ' + r.status); return r.json(); })
       .then(function(rel){
         var names = (rel.assets || []).map(function(a){ return a.name; });
-        var want = ['nextar-home.png','nextar-create.png','nextar-extract.png','nextar-inspect.png','nextar-repair.png','nextar-settings.png'];
+        var want = ['nextar-home.png','nextar-create.png','nextar-extract.png','nextar-inspect.png','nextar-repair.png','nextar-settings.png','nextar-splash.png','nextar-wizard.png'];
         var missing = want.filter(function(w){ return names.indexOf(w) === -1; });
         var updated = (rel.assets || []).map(function(a){ return a.updated_at; }).sort().pop() || '';
         var day = (updated.match(/^(\d{4}-\d{2}-\d{2})/) || [])[1] || '';
         if (missing.length) {
           paintShots(false, 'screenshots · ' + (missing.length) + ' missing from nightly', 'Missing: ' + missing.join(', '));
         } else {
-          paintShots(true, ['screenshots', day || 'nightly', '6 views — click to view'].filter(Boolean).join(' · '),
+          paintShots(true, ['screenshots', day || 'nightly', '8 captures — click to view'].filter(Boolean).join(' · '),
             'Fresh captures from the nightly build — click to open the releases page.');
         }
       })
