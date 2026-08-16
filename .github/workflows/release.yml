@@ -59,6 +59,11 @@ jobs:
   windows:
     runs-on: windows-latest
     needs: prepare
+    # Secrets can't be read directly in `if:` conditions, so expose them as
+    # job-level env vars; the signing/verify steps check these instead.
+    env:
+      CODE_SIGN_PFX: ${{ secrets.CODE_SIGN_PFX }}
+      CODE_SIGN_PFX_PASS: ${{ secrets.CODE_SIGN_PFX_PASS }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -85,11 +90,8 @@ jobs:
       # .pfx). Without the secrets the release still builds — it ships
       # unsigned. Secrets: CODE_SIGN_PFX (base64 .pfx) + CODE_SIGN_PFX_PASS.
       - name: Code-sign installer and binaries
-        if: ${{ secrets.CODE_SIGN_PFX != '' }}
+        if: env.CODE_SIGN_PFX != ''
         shell: pwsh
-        env:
-          CODE_SIGN_PFX: ${{ secrets.CODE_SIGN_PFX }}
-          CODE_SIGN_PFX_PASS: ${{ secrets.CODE_SIGN_PFX_PASS }}
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODE_SIGN_PFX))
@@ -112,7 +114,7 @@ jobs:
       # Authenticode signature or the release is refused (a silently unsigned
       # release would defeat the whole point of the step above).
       - name: Verify Authenticode signatures
-        if: ${{ secrets.CODE_SIGN_PFX != '' }}
+        if: env.CODE_SIGN_PFX != ''
         shell: pwsh
         run: |
           $bad = @()
