@@ -127,20 +127,18 @@ function decodePNG(buf) {
   return { width: w, height: h, rgba: out };
 }
 
-// Pad a (possibly non-square) RGBA image onto a square black canvas.
-// The logo's own background is black, so the padding blends seamlessly.
+// Pad a (possibly non-square) RGBA image onto a square TRANSPARENT canvas.
+// The source logo already carries its own transparency (the ribbon on a
+// transparent background), so the padding preserves each pixel's alpha and
+// the mark floats without any tile/bezel. Used only for the square icon
+// surfaces (ico/icns/exe) where a square canvas is required by the format.
 function padSquare(img, size, scale) {
   const s = scale || 0.86;
   const dw = Math.round(size * s);
   const dh = Math.round(dw * (img.height / img.width));
   const dx = Math.round((size - dw) / 2);
   const dy = Math.round((size - dh) / 2);
-  const out = Buffer.alloc(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      out[(y * size + x) * 4 + 3] = 255;
-    }
-  }
+  const out = Buffer.alloc(size * size * 4); // zeroed => alpha 0 (transparent)
   const sy = (img.height / dh) || 1;
   const sx = (img.width / dw) || 1;
   for (let y = 0; y < dh; y++) {
@@ -149,11 +147,10 @@ function padSquare(img, size, scale) {
       const ix = Math.min(img.width - 1, Math.floor(x * sx));
       const s = (iy * img.width + ix) * 4;
       const d = ((dy + y) * size + dx + x) * 4;
-      const a = img.rgba[s + 3] / 255;
-      out[d] = Math.round(img.rgba[s] * a);
-      out[d + 1] = Math.round(img.rgba[s + 1] * a);
-      out[d + 2] = Math.round(img.rgba[s + 2] * a);
-      out[d + 3] = 255;
+      out[d] = img.rgba[s];
+      out[d + 1] = img.rgba[s + 1];
+      out[d + 2] = img.rgba[s + 2];
+      out[d + 3] = img.rgba[s + 3];
     }
   }
   return { size, rgba: out };
@@ -213,6 +210,47 @@ function renderRaster(size) {
   const master = rasterMaster();
   if (!master) return null;
   return downscaleSquare(master, size);
+}
+
+// Crop the source to its content bounding box (trim the transparent
+// padding) and scale to a max width, preserving the natural aspect ratio.
+// The result is the bare ribbon mark — no square tile — used by the in-app
+// painters and the site hero. Returns { width, height, rgba } or null.
+function renderWide(maxW) {
+  if (!fs.existsSync(SRC)) return null;
+  const img = decodePNG(fs.readFileSync(SRC));
+  let x0 = img.width, y0 = img.height, x1 = 0, y1 = 0;
+  for (let y = 0; y < img.height; y++) {
+    for (let x = 0; x < img.width; x++) {
+      if (img.rgba[(y * img.width + x) * 4 + 3] > 8) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  const cw = x1 - x0 + 1;
+  const ch = y1 - y0 + 1;
+  if (cw <= 0 || ch <= 0) return null;
+  const dw = Math.round(maxW);
+  const dh = Math.max(1, Math.round(ch * (maxW / cw)));
+  const out = Buffer.alloc(dw * dh * 4);
+  const sx = cw / dw;
+  const sy = ch / dh;
+  for (let y = 0; y < dh; y++) {
+    const iy = Math.min(ch - 1, Math.floor(y * sy));
+    for (let x = 0; x < dw; x++) {
+      const ix = Math.min(cw - 1, Math.floor(x * sx));
+      const s = ((y0 + iy) * img.width + (x0 + ix)) * 4;
+      const d = (y * dw + x) * 4;
+      out[d] = img.rgba[s];
+      out[d + 1] = img.rgba[s + 1];
+      out[d + 2] = img.rgba[s + 2];
+      out[d + 3] = img.rgba[s + 3];
+    }
+  }
+  return { width: dw, height: dh, rgba: out };
 }
 
 // ----------------------------- PNG encoder -----------------------------
@@ -513,13 +551,19 @@ function main() {
   fs.writeFileSync(path.join(RES, `nextar${tag}.png`), png256.png);
   fs.writeFileSync(path.join(RES, `nextar${tag}-chevron.png`), png256.png);
 
-  // The square master the Rust painters embed and draw at runtime
-  // (512 px is crisp at every in-app size and keeps the binary lean).
-  // renderIcon prefers the raster source and always returns a .png.
+  // The square master the icon surfaces (ico/icns/exe) embed — transparent
+  // padding, since the ribbon's own alpha is preserved.
   const master = renderIcon(512, 1, DARK);
   fs.writeFileSync(path.join(RES, 'logo-master.png'), master.png);
 
-  console.log(`[generate-icon] ${DARK ? 'dark' : 'light'} wrote resources/nextar${tag}.ico (16/24/32/48/64/128/256) + nextar${tag}.png (+ nextar${tag}-chevron.png, logo-master.png)`);
+  // The content-cropped ribbon mark the in-app painters and site hero use:
+  // bare mark, natural aspect ratio, no tile.
+  const wide = renderWide(1024);
+  if (wide) {
+    fs.writeFileSync(path.join(RES, 'logo-ribbon.png'), encodePNG(wide.width, wide.height, wide.rgba));
+  }
+
+  console.log(`[generate-icon] ${DARK ? 'dark' : 'light'} wrote resources/nextar${tag}.ico (16/24/32/48/64/128/256) + nextar${tag}.png (+ nextar${tag}-chevron.png, logo-master.png, logo-ribbon.png)`);
 }
 
 if (require.main === module) {
@@ -528,5 +572,5 @@ if (require.main === module) {
   // Reusable by other tooling (e.g. scripts/build-icns.js and
   // scripts/build-site-assets.js): renderIcon(size, supersample, dark) ->
   // { size, rgba, png }, plus the raw PNG encoder for compositing.
-  module.exports = { renderIcon, palette, encodePNG };
+  module.exports = { renderIcon, renderWide, palette, encodePNG };
 }

@@ -190,12 +190,11 @@
     background:radial-gradient(circle,rgba(95,242,255,.14),rgba(139,123,255,.10) 45%,transparent 70%);
     filter:blur(10px);animation:halo-breathe 5.5s var(--ease-soft) infinite alternate}
   @keyframes halo-breathe{from{transform:scale(.94);opacity:.75}to{transform:scale(1.06);opacity:1}}
-  .logo-tile{position:relative;width:min(46vw,340px);aspect-ratio:1;border-radius:22%;
+  .logo-tile{position:relative;width:min(44vw,330px);height:auto;
     animation:float 7s var(--ease-soft) infinite alternate}
   @keyframes float{from{transform:translateY(-8px) rotate(-1.2deg)}to{transform:translateY(10px) rotate(1.6deg)}}
-  .logo-tile img{width:100%;height:100%;display:block;border-radius:22%;
-    box-shadow:0 0 0 1px rgba(255,255,255,.14),0 0 60px -10px rgba(95,242,255,.35),
-      0 40px 90px -30px rgba(0,0,0,.9)}
+  .logo-tile img{width:100%;height:auto;display:block;
+    filter:drop-shadow(0 0 34px rgba(95,242,255,.30)) drop-shadow(0 26px 44px rgba(0,0,0,.55))}
   .orbit{position:absolute;inset:-7%;border-radius:50%;pointer-events:none;opacity:.5;
     border:1px dashed rgba(95,242,255,.22);animation:spin 46s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -531,7 +530,7 @@
       <div class="hero-visual reveal" style="--d:.2s">
         <div class="halo"></div>
         <div class="orbit"><span class="tick" style="top:0;left:50%"></span><span class="tick" style="top:50%;left:100%"></span><span class="tick" style="bottom:0;left:50%"></span></div>
-        <div class="logo-tile"><img src="logo.png" alt="nextar logo — isometric ribbon compressing data"></div>
+        <div class="logo-tile"><img src="logo-ribbon.png" alt="nextar logo — isometric ribbon compressing data"></div>
         <div class="tag-pill t1"><b>zstd</b> · 1.5 GB/s</div>
         <div class="tag-pill t2"><b>.nvol</b> heals</div>
         <div class="tag-pill t3"><b>aes-256-gcm</b></div>

@@ -11,7 +11,7 @@
 // Re-run whenever the mark, colors, or name change: `node scripts/build-site-assets.js`.
 const fs = require('fs');
 const path = require('path');
-const { renderIcon, encodePNG } = require('./generate-icon.js');
+const { renderIcon, renderWide, encodePNG } = require('./generate-icon.js');
 const { rasterizeText } = require('./font-raster.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -142,10 +142,16 @@ fs.writeFileSync(path.join(SITE, 'apple-touch-icon.png'), encodePNG(180, 180, ma
 fs.writeFileSync(path.join(SITE, 'icon-192.png'), encodePNG(192, 192, markOnNavy(192, 0.85)));
 fs.writeFileSync(path.join(SITE, 'icon-512.png'), encodePNG(512, 512, markOnNavy(512, 0.85)));
 fs.writeFileSync(path.join(SITE, 'og-image.png'), ogImage());
-// The hero + brand-mark logos reference this file (they used to inline the
-// mark as a giant base64 blob; a file keeps the HTML lean and always in
-// sync with the raster logo).
+// The brand-mark logos (nav + footer) reference this file: the square
+// icon-form master with transparent padding.
 fs.writeFileSync(path.join(SITE, 'logo.png'), renderIcon(512, 2, false).png);
+
+// The hero uses the content-cropped ribbon at its natural aspect ratio —
+// no tile, floats on the page background.
+const ribbon = renderWide(640);
+if (ribbon) {
+  fs.writeFileSync(path.join(SITE, 'logo-ribbon.png'), encodePNG(ribbon.width, ribbon.height, ribbon.rgba));
+}
 
 const manifest = {
   name: 'nextar',
@@ -164,5 +170,5 @@ const manifest = {
 fs.writeFileSync(path.join(SITE, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
 console.log(
-  'wrote site/favicon.ico, apple-touch-icon.png, icon-192.png, icon-512.png, og-image.png, logo.png, manifest.json'
+  'wrote site/favicon.ico, apple-touch-icon.png, icon-192.png, icon-512.png, og-image.png, logo.png, logo-ribbon.png, manifest.json'
 );

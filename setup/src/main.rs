@@ -1050,19 +1050,17 @@ fn blend_palettes(a: LogoPalette, b: LogoPalette, t: f32) -> LogoPalette {
     }
 }
 
-/// Draw the brand lockup: a circular glass tile with a neon-cyan ring
-/// carrying the convergence core — three nested chevron planes (violet →
-/// indigo → cyan) that fold inward and feed a bright core node. The tile
-/// swaps between frosted white (light mode) and deep navy (dark mode) to
-/// follow the Windows theme (mirrors nextar-gui and the icon generator).
-/// The raster logo (resources/logo-master.png — the isometric ribbon on a
-/// black square tile), decoded once at startup. Same source as nextar-gui.
+/// Draw the brand mark: the raster ribbon logo, transparent background,
+/// at its natural aspect ratio — no tile, no bezel.
+/// The raster logo (resources/logo-ribbon.png — the isometric ribbon,
+/// content-cropped at its natural aspect on a transparent background),
+/// decoded once at startup. Same source as nextar-gui.
 fn logo_image() -> &'static egui::ColorImage {
     static IMG: OnceLock<egui::ColorImage> = OnceLock::new();
     IMG.get_or_init(|| {
-        let bytes: &[u8] = include_bytes!("../../resources/logo-master.png");
+        let bytes: &[u8] = include_bytes!("../../resources/logo-ribbon.png");
         let dec = png::Decoder::new(std::io::Cursor::new(bytes));
-        let mut reader = dec.read_info().expect("logo-master.png decodes");
+        let mut reader = dec.read_info().expect("logo-ribbon.png decodes");
         let mut buf = vec![0u8; reader.output_buffer_size().expect("output size")];
         let info = reader.next_frame(&mut buf).expect("logo frame");
         let (w, h) = (info.width as usize, info.height as usize);
@@ -1073,70 +1071,35 @@ fn logo_image() -> &'static egui::ColorImage {
 /// The logo texture for this egui context, cached so it uploads once.
 fn logo_texture(ctx: &egui::Context) -> egui::TextureHandle {
     let key = egui::Id::new("nextar-logo-tex");
-    ctx.data_mut(|d| {
-        if let Some(tex) = d.get_temp::<egui::TextureHandle>(key) {
-            return tex;
-        }
-        let tex = ctx.load_texture("nextar-logo", logo_image().clone(), egui::TextureOptions::LINEAR);
-        d.insert_temp(key, tex.clone());
-        tex
-    })
-}
-
-/// Tessellate a rounded rectangle textured with `tex_id`, tinted `tint`,
-/// as a fan from the center with per-vertex UVs across the rect.
-fn rounded_image_mesh(rect: egui::Rect, radius: f32, tex_id: egui::TextureId, tint: Color32) -> egui::Mesh {
-    let mut mesh = egui::Mesh::default();
-    mesh.texture_id = tex_id;
-    let r = radius.clamp(0.0, rect.width().min(rect.height()) * 0.5);
-    let (l, t, rr, b) = (rect.left(), rect.top(), rect.right(), rect.bottom());
-    let w = rect.width();
-    let h = rect.height();
-    let push = |mesh: &mut egui::Mesh, x: f32, y: f32| {
-        let idx = mesh.vertices.len() as u32;
-        mesh.vertices.push(egui::epaint::Vertex {
-            pos: egui::pos2(x, y),
-            uv: egui::pos2((x - l) / w, (y - t) / h),
-            color: tint,
-        });
-        idx
-    };
-    let center = push(&mut mesh, rect.center().x, rect.center().y);
-    let mut ring: Vec<u32> = Vec::new();
-    let segs = 8usize;
-    let arc = |mesh: &mut egui::Mesh, cx: f32, cy: f32, a0: f32, a1: f32, ring: &mut Vec<u32>| {
-        for k in 0..segs {
-            let a = a0 + (a1 - a0) * (k as f32 / segs as f32);
-            ring.push(push(mesh, cx + r * a.cos(), cy + r * a.sin()));
-        }
-    };
-    // Clockwise (y-down, angle 0 = right): BR → BL → TL → TR corners.
-    arc(&mut mesh, rr - r, b - r, 0.0, std::f32::consts::FRAC_PI_2, &mut ring);
-    arc(&mut mesh, l + r, b - r, std::f32::consts::FRAC_PI_2, std::f32::consts::PI, &mut ring);
-    arc(&mut mesh, l + r, t + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI, &mut ring);
-    arc(&mut mesh, rr - r, t + r, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI, &mut ring);
-    ring.push(ring[0]);
-    for k in 0..ring.len() - 1 {
-        mesh.indices.extend_from_slice(&[center, ring[k], ring[k + 1]]);
+    // Fast path first, reading without holding the write lock.
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
+        return tex;
     }
-    mesh
+    // Load OUTSIDE data_mut: load_texture locks the same context data, so
+    // calling it inside the closure would deadlock the UI thread on first
+    // paint (window created but never rendered).
+    let tex = ctx.load_texture("nextar-logo", logo_image().clone(), egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(key, tex.clone()));
+    tex
 }
 
-/// The brand tile: the raster logo drawn as a rounded square plus a thin
-/// neon ring for the lit-chrome accent. `fade` drives the entrance alpha.
+/// The brand mark: the raster logo drawn at its natural aspect ratio,
+/// centered in `rect` on the transparent background — no tile, no bezel.
+/// `fade` drives the entrance alpha.
 fn draw_logo_tile(p: &egui::Painter, rect: egui::Rect, fade: f32) {
-    let w = rect.width();
     let tex = logo_texture(p.ctx());
-    let radius = (w * 0.22).clamp(4.0, 40.0);
-    let tint = alpha(Color32::WHITE, fade);
-    p.add(rounded_image_mesh(rect, radius, tex.id(), tint));
-    let pal = logo_palette();
-    p.rect_stroke(
-        rect,
-        CornerRadius::same(radius as u8),
-        Stroke::new((0.012 * w).max(1.0), alpha(pal.bezel, fade * 0.55)),
-        egui::StrokeKind::Inside,
-    );
+    let size = logo_image().size;
+    let aspect = size[0] as f32 / size[1] as f32;
+    // Fit the ribbon into the rect preserving its aspect ratio.
+    let (mut w, mut h) = (rect.width(), rect.height());
+    if w / h > aspect {
+        w = h * aspect;
+    } else {
+        h = w / aspect;
+    }
+    let r = egui::Rect::from_center_size(rect.center(), egui::Vec2::new(w, h));
+    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    p.image(tex.id(), r, uv, alpha(Color32::WHITE, fade));
 }
 
 fn draw_logo_at(p: &egui::Painter, rect: egui::Rect, fade: f32) {
@@ -2135,57 +2098,18 @@ mod tests {
     }
 
     #[test]
-    fn rounded_image_mesh_covers_center_not_corners() {
-        // The rounded-square tile mesh must fill the tile: center and edge
-        // midpoints covered, the four corners (outside the rounding) left
-        // empty, consistent winding.
-        let rect = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(100.0, 100.0));
-        let mesh = rounded_image_mesh(rect, 20.0, egui::TextureId::Managed(1), Color32::from_rgb(255, 0, 0));
-        assert_eq!(mesh.indices.len() % 3, 0);
-        assert_eq!(mesh.texture_id, egui::TextureId::Managed(1));
-        let tri = |i: usize| -> [egui::Pos2; 3] {
-            [
-                mesh.vertices[mesh.indices[i * 3] as usize].pos,
-                mesh.vertices[mesh.indices[i * 3 + 1] as usize].pos,
-                mesh.vertices[mesh.indices[i * 3 + 2] as usize].pos,
-            ]
-        };
-        let cross = |t: [egui::Pos2; 3]| {
-            (t[1].x - t[0].x) * (t[2].y - t[0].y) - (t[1].y - t[0].y) * (t[2].x - t[0].x)
-        };
-        let first = cross(tri(0));
-        assert!(first > 0.0, "first triangle must be positive-cross");
-        for i in 1..mesh.indices.len() / 3 {
-            assert!(
-                (cross(tri(i)) > 0.0) == (first > 0.0),
-                "triangle {i} has inconsistent winding"
-            );
-        }
-        let inside = |p: egui::Pos2| {
-            (0..mesh.indices.len() / 3).any(|i| {
-                let [a, b, c] = tri(i);
-                let d1 = cross([a, b, p]);
-                let d2 = cross([b, c, p]);
-                let d3 = cross([c, a, p]);
-                (d1 >= 0.0 && d2 >= 0.0 && d3 >= 0.0) || (d1 <= 0.0 && d2 <= 0.0 && d3 <= 0.0)
-            })
-        };
-        assert!(inside(egui::pos2(50.0, 50.0)), "center should be covered");
-        assert!(inside(egui::pos2(50.0, 8.0)), "top edge should be covered");
-        assert!(inside(egui::pos2(8.0, 50.0)), "left edge should be covered");
-        assert!(!inside(egui::pos2(1.0, 1.0)), "top-left corner should be empty");
-        assert!(!inside(egui::pos2(99.0, 1.0)), "top-right corner should be empty");
-        assert!(!inside(egui::pos2(1.0, 99.0)), "bottom-left corner should be empty");
-        assert!(!inside(egui::pos2(99.0, 99.0)), "bottom-right corner should be empty");
-    }
-
-    #[test]
-    fn embedded_logo_is_square_rgba() {
+    fn embedded_logo_is_transparent_rgba() {
+        // The raster logo is the single source of truth for the brand mark:
+        // it must decode to an RGBA image (content-cropped to the ribbon)
+        // with real content and a transparent background (no tile).
         let img = logo_image();
-        assert_eq!(img.size[0], img.size[1], "logo tile must be square");
-        assert!(img.size[0] > 0);
+        let (w, h) = (img.size[0], img.size[1]);
+        assert!(w > 0 && h > 0);
         let total = img.pixels.len();
-        assert_eq!(total, img.size[0] * img.size[1]);
+        assert_eq!(total, w * h);
+        // The background must be transparent, not a black tile.
+        let transparent = img.pixels.iter().filter(|p| p.a() < 10).count();
+        assert!(transparent > total / 10, "logo background must be transparent");
         let colorful = img
             .pixels
             .iter()
