@@ -22,6 +22,15 @@ cp target/release/nextar.exe dist/
 cp target/release/nextar-gui.exe dist/
 cp setup/target/release/nextar-setup.exe dist/
 
+# Sign the payload with the Michael Rieger code-signing cert when available
+# (scripts/sign.ps1 creates it on first run). Best effort: if signtool or the
+# cert is missing, the build still succeeds — signing is a distribution nicety.
+if command -v powershell >/dev/null 2>&1; then
+    echo "==> signing dist/ payload (best effort)"
+    # sign.ps1's default path list covers target/release + dist/.
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign.ps1 2>&1 | sed 's/^/    /' || echo "    (signing skipped - install Windows SDK signtool or run scripts/sign.ps1)"
+fi
+
 echo "==> dist/"
 ls -la dist/
 echo

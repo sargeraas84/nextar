@@ -22,6 +22,8 @@ param(
         "$PSScriptRoot\..\target\release\nextar.exe",
         "$PSScriptRoot\..\target\release\nextar-gui.exe",
         "$PSScriptRoot\..\setup\target\release\nextar-setup.exe",
+        "$PSScriptRoot\..\dist\nextar.exe",
+        "$PSScriptRoot\..\dist\nextar-gui.exe",
         "$PSScriptRoot\..\dist\nextar-setup.exe"
     ),
     [string]$CertSubject = "Michael Rieger",

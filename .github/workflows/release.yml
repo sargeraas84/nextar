@@ -79,6 +79,35 @@ jobs:
         shell: bash
         run: bash scripts/package.sh
 
+      # Code-sign the payload when a signing cert is configured. The cert must
+      # be a code-signing cert whose private key is importable from a base64
+      # PFX (e.g. Azure Code Signing, DigiCert Key Vault, or any exported
+      # .pfx). Without the secrets the release still builds — it ships
+      # unsigned. Secrets: CODE_SIGN_PFX (base64 .pfx) + CODE_SIGN_PFX_PASS.
+      - name: Code-sign installer and binaries
+        if: ${{ secrets.CODE_SIGN_PFX != '' }}
+        shell: pwsh
+        env:
+          CODE_SIGN_PFX: ${{ secrets.CODE_SIGN_PFX }}
+          CODE_SIGN_PFX_PASS: ${{ secrets.CODE_SIGN_PFX_PASS }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODE_SIGN_PFX))
+          $pwd = ConvertTo-SecureString -String $env:CODE_SIGN_PFX_PASS -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pwd
+          Write-Host "imported cert: $($cert.Subject) thumbprint $($cert.Thumbprint)"
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
+            Sort-Object { [version]$_.Name } -Descending |
+            ForEach-Object { Join-Path $_.FullName "x64\signtool.exe" } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+          if (-not $signtool) { throw "signtool not found" }
+          foreach ($f in @("dist\nextar.exe", "dist\nextar-gui.exe", "dist\nextar-setup.exe")) {
+            & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint /tr http://timestamp.digicert.com /td SHA256 $f
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed on $f" }
+          }
+          Write-Host "signed 3 artifacts"
+
       # Release gate: the full installer lifecycle must pass before the
       # artifacts are attached to the release.
       - name: Installer E2E - full install, upgrade, uninstall

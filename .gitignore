@@ -19,3 +19,6 @@ Desktop.ini
 
 # Dev-only screenshot capture tooling
 /_shots
+
+# Code-signing private keys - never commit
+*.pfx
