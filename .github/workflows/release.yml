@@ -278,7 +278,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $prev = gh api "repos/${{ github.repository }}/releases?per_page=100" --jq "[.[] | select(.tag_name != \"nightly\" and .draft == false and .tag_name != \"$tag\")][0].tag_name"
+          # List tag names with a quote-free jq (embedded quotes in the jq
+          # program get mangled by pwsh native-arg passing and break the
+          # call); filter nightly + the tag being released in PowerShell.
+          $tags = gh api "repos/${{ github.repository }}/releases?per_page=100" --jq '.[].tag_name'
+          $prev = $tags | Where-Object { $_ -and $_ -ne 'nightly' -and $_ -ne $tag } | Select-Object -First 1
           if (-not $prev) {
             Write-Host "No previous stable release found - the cross-version leg will be skipped."
             exit 0
