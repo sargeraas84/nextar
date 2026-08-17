@@ -268,11 +268,40 @@ jobs:
           }
 
       # Release gate: the full installer lifecycle must pass before the
-      # artifacts are attached to the release.
-      - name: Installer E2E - full install, upgrade, uninstall
+      # artifacts are attached to the release. Two legs: an in-place
+      # install/upgrade/uninstall of this build, plus (when a previous
+      # stable release exists) a cross-version upgrade from it, so every
+      # cut is proven to upgrade cleanly from the prior stable version.
+      - name: Download previous stable installer (upgrade-from leg)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $prev = gh api "repos/${{ github.repository }}/releases?per_page=100" --jq "[.[] | select(.tag_name != \"nightly\" and .draft == false and .tag_name != \"$tag\")][0].tag_name"
+          if (-not $prev) {
+            Write-Host "No previous stable release found - the cross-version leg will be skipped."
+            exit 0
+          }
+          Write-Host "Previous stable release: $prev"
+          Invoke-WebRequest "https://github.com/${{ github.repository }}/releases/download/$prev/nextar-setup.exe" -OutFile "$env:RUNNER_TEMP\prev-setup.exe"
+          Write-Host "Downloaded previous installer: $((Get-Item "$env:RUNNER_TEMP\prev-setup.exe").Length) bytes"
+
+      - name: Installer E2E - in-place + cross-version upgrade
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -Full -OnlyInstaller -SetupExe "dist\nextar-setup.exe"
+          $common = @('-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/verify-shell.ps1','-Installer','-Full','-OnlyInstaller','-SetupExe',"dist\nextar-setup.exe")
+          & powershell.exe @common
+          if ($LASTEXITCODE -ne 0) { throw "in-place installer E2E failed (exit $LASTEXITCODE)" }
+          Write-Host "in-place E2E passed"
+          if (Test-Path "$env:RUNNER_TEMP\prev-setup.exe") {
+            Write-Host "running cross-version upgrade E2E (-UpgradeFrom previous stable)..."
+            & powershell.exe @common '-UpgradeFrom' "$env:RUNNER_TEMP\prev-setup.exe"
+            if ($LASTEXITCODE -ne 0) { throw "cross-version upgrade E2E failed (exit $LASTEXITCODE)" }
+            Write-Host "cross-version upgrade E2E passed"
+          } else {
+            Write-Host "no previous stable - skipped the cross-version leg"
+          }
 
       - uses: actions/upload-artifact@v4
         with:
