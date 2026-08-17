@@ -3,8 +3,8 @@
 IDI_ICON1 ICON "../resources/nextar.ico"
 
 1 VERSIONINFO
-FILEVERSION 0,3,3,0
-PRODUCTVERSION 0,3,3,0
+FILEVERSION 0,3,4,0
+PRODUCTVERSION 0,3,4,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -17,11 +17,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Michael Rieger"
             VALUE "FileDescription", "nextar installer"
-            VALUE "FileVersion", "0.3.3"
+            VALUE "FileVersion", "0.3.4"
             VALUE "InternalName", "nextar-setup"
             VALUE "LegalCopyright", "(c) 2026 Michael Rieger"
             VALUE "ProductName", "nextar"
-            VALUE "ProductVersion", "0.3.3"
+            VALUE "ProductVersion", "0.3.4"
         END
     END
     BLOCK "VarFileInfo"
