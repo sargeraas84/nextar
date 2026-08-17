@@ -24,7 +24,8 @@ param(
     [switch]$OnlyInstaller,  # skip registry/explorer checks; run only the E2E
     [switch]$Full,       # -Installer -Full: with shell integration (ephemeral runner)
     [string]$SetupExe = '',    # explicit nextar-setup.exe path for the installer E2E
-    [string]$UpgradeFrom = ''  # older setup exe; -Full installs THIS first, then upgrades with -SetupExe
+    [string]$UpgradeFrom = '', # older setup exe; -Full installs THIS first, then upgrades with -SetupExe
+    [switch]$AllowSameVersion  # tolerate -UpgradeFrom == -SetupExe version (nightly vs stable smoke leg)
 )
 $ErrorActionPreference = 'Stop'
 
@@ -335,7 +336,13 @@ if ($Installer) {
                     $installExe = $UpgradeFrom
                     $vOld = (Get-Item -LiteralPath $UpgradeFrom).VersionInfo.FileVersion
                     $vNew = (Get-Item -LiteralPath $setup).VersionInfo.FileVersion
-                    Check "upgrade crosses versions ($vOld -> $vNew)" ($vOld -ne $vNew)
+                    if ($vOld -ne $vNew) {
+                        Check "upgrade crosses versions ($vOld -> $vNew)" $true
+                    } elseif ($AllowSameVersion) {
+                        Write-Host "  (note: same version $vOld -> $vNew - nightly vs stable; upgrade checks still run)" -ForegroundColor DarkGray
+                    } else {
+                        Check "upgrade crosses versions ($vOld -> $vNew)" $false
+                    }
                 }
                 & $installExe --prefix $e2e --quiet 2>&1 | Out-Null
                 Check "install exited 0" ($LASTEXITCODE -eq 0)

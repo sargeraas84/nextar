@@ -155,6 +155,39 @@ jobs:
           "summary=$summary" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           exit $code
 
+      # Daily upgrade test: install the latest STABLE release first, then
+      # upgrade in place with the shipped nightly, proving the rolling build
+      # upgrades cleanly from the previous stable while preserving settings.
+      # The nightly and the latest stable share the same version string until
+      # the next cut, so -AllowSameVersion keeps the upgrade checks running
+      # (the version-crossing assertion is only meaningful for releases). The
+      # -Full E2E's finally-block restores the nextar-smoke shell state after.
+      - name: Download previous stable installer (upgrade-from leg)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tags = gh api "repos/${{ github.repository }}/releases?per_page=100" --jq '.[].tag_name'
+          $prev = $tags | Where-Object { $_ -and $_ -ne 'nightly' } | Select-Object -First 1
+          if (-not $prev) {
+            Write-Host "no previous stable release found - upgrade leg skipped"
+            exit 0
+          }
+          Write-Host "Previous stable release: $prev"
+          Invoke-WebRequest "https://github.com/${{ github.repository }}/releases/download/$prev/nextar-setup.exe" -OutFile "$env:RUNNER_TEMP\prev-stable-setup.exe"
+          Write-Host "Downloaded: $((Get-Item "$env:RUNNER_TEMP\prev-stable-setup.exe").Length) bytes"
+
+      - name: Cross-version upgrade E2E (stable -> nightly)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:RUNNER_TEMP\prev-stable-setup.exe")) {
+            Write-Host "no previous stable - upgrade leg skipped"
+            exit 0
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -Full -OnlyInstaller -AllowSameVersion -SetupExe "$env:RUNNER_TEMP\nextar-setup.exe" -UpgradeFrom "$env:RUNNER_TEMP\prev-stable-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "cross-version upgrade E2E failed (exit $LASTEXITCODE)" }
+          Write-Host "cross-version upgrade E2E passed"
+
   # Always runs (even when a job failed/skipped) and records the per-job
   # results in two places:
   #   1. the nightly release BODY (visible on the release page), and
