@@ -370,11 +370,30 @@ fn run(actions: &[Act], dry: bool, cancel: &AtomicBool) -> Result<()> {
                 create_lnk(lnk, target, icon, args)?;
             }
             Act::RemoveFile { path } => {
-                let _ = std::fs::remove_file(path);
+                remove_file_retry(path);
             }
         }
     }
     Ok(())
+}
+
+/// Remove a file, retrying briefly. Windows Defender/AV can transiently
+/// lock a freshly written binary for a few hundred ms (uninstall right
+/// after install is exactly when that happens), and a silent failure there
+/// would leave the payload behind. NotFound counts as success (already
+/// gone); only PermissionDenied is retried.
+fn remove_file_retry(path: &Path) {
+    use std::io::ErrorKind;
+    for attempt in 0..10 {
+        match std::fs::remove_file(path) {
+            Ok(()) => return,
+            Err(e) if e.kind() == ErrorKind::NotFound => return,
+            Err(e) if e.kind() == ErrorKind::PermissionDenied && attempt < 9 => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            Err(_) => return,
+        }
+    }
 }
 
 /// Invalidate Explorer's association/verb cache so newly registered
@@ -741,7 +760,7 @@ fn uninstall(prefix: &Path, dry: bool, quiet: bool, no_shell: bool) -> Result<()
                 Err(e) => println!("  ! could not schedule folder cleanup: {e}"),
             }
         } else {
-            let _ = std::fs::remove_file(prefix.join("nextar-setup.exe"));
+            remove_file_retry(&prefix.join("nextar-setup.exe"));
             let _ = std::fs::remove_dir(prefix);
         }
         println!();

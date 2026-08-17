@@ -13,6 +13,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -OnlyInstaller -SetupExe <path>
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-shell.ps1 -Installer -Full -OnlyInstaller -SetupExe <path>
+#   ... -Installer -Full -OnlyInstaller -SetupExe <path> -UpgradeFrom <older-setup.exe>
 #
 # Exit code: 0 = all checks passed, 1 = one or more failed.
 
@@ -22,7 +23,8 @@ param(
     [switch]$Installer,  # headless installer E2E: install, upgrade, uninstall
     [switch]$OnlyInstaller,  # skip registry/explorer checks; run only the E2E
     [switch]$Full,       # -Installer -Full: with shell integration (ephemeral runner)
-    [string]$SetupExe = ''  # explicit nextar-setup.exe path for the installer E2E
+    [string]$SetupExe = '',    # explicit nextar-setup.exe path for the installer E2E
+    [string]$UpgradeFrom = ''  # older setup exe; -Full installs THIS first, then upgrades with -SetupExe
 )
 $ErrorActionPreference = 'Stop'
 
@@ -324,7 +326,18 @@ if ($Installer) {
 
             if ($Full) {
                 # ---- full lifecycle: install (with shell) -> upgrade -> uninstall
-                & $setup --prefix $e2e --quiet 2>&1 | Out-Null
+                # -UpgradeFrom points at an OLDER setup exe; when given, the
+                # first install uses it so the upgrade step genuinely crosses
+                # a version boundary (e.g. v0.3.1 -> v0.3.2) instead of
+                # reinstalling the same build twice.
+                $installExe = $setup
+                if ($UpgradeFrom) {
+                    $installExe = $UpgradeFrom
+                    $vOld = (Get-Item -LiteralPath $UpgradeFrom).VersionInfo.FileVersion
+                    $vNew = (Get-Item -LiteralPath $setup).VersionInfo.FileVersion
+                    Check "upgrade crosses versions ($vOld -> $vNew)" ($vOld -ne $vNew)
+                }
+                & $installExe --prefix $e2e --quiet 2>&1 | Out-Null
                 Check "install exited 0" ($LASTEXITCODE -eq 0)
                 Check "install wrote the three payload exes" ((Test-Path -LiteralPath $exe) -and (Test-Path -LiteralPath $guiexe) -and (Test-Path -LiteralPath $setupexe))
                 Check-SettingsFlags $guiexe
