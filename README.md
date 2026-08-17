@@ -344,17 +344,25 @@ Three workflows keep the shipped artifacts fresh and honest:
   latest entry.
 - **`ci` (per-push)** — full test + shell + installer E2E suite, gated by
   branch protection on `master`.
+- **`monthly-audit` (1st of month, 07:00 UTC)** — re-checks the last 31 days
+  of schedule-fired nightly + smoke runs and opens (or updates) a
+  `scheduled-audit` tracking issue if any slot was missed or failed, so a
+  silent cron gap (GitHub skips schedules during outages) is caught within
+  a month.
 
 To verify the schedule-fired (no-push) runs after the fact — e.g. first
 thing in the morning — run:
 
 ```bash
 bash scripts/check-scheduled-runs.sh [owner/repo]
+bash scripts/check-scheduled-runs.sh [owner/repo] -n 31   # last month, for the audit
 ```
 
 It asserts both workflows fired via the `schedule` event (not a push)
 **today**, completed green, and that the release body carries that day's
-smoke results. See **`scripts/check-scheduled-runs.sh`** for details.
+smoke results. The `-n N` form checks every one of the last N days (days
+before a workflow's first-ever schedule run are skipped), which is what the
+monthly audit uses. See **`scripts/check-scheduled-runs.sh`** for details.
 
 ## Status
 

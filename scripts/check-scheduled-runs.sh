@@ -5,13 +5,26 @@
 # (not a push), completed green, and that the release body carries that
 # day's smoke results.
 #
-#   usage: scripts/check-scheduled-runs.sh [owner/repo]   (default: from git)
+#   usage: scripts/check-scheduled-runs.sh [owner/repo] [-n N]
+#     -n N    check the last N days instead of today only (default 1; the
+#             monthly audit workflow uses -n 31). Range mode asserts each of
+#             the last N days had a schedule-event nightly + smoke run that
+#             completed success, and skips the day-specific release-body
+#             checks.
 #
 # Exit 0 when everything is green; non-zero with a clear message otherwise.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-REPO="${1:-$(git remote get-url origin 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#' || true)}"
+RANGE=1
+REPO=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n|--range) RANGE="$2"; shift 2 ;;
+    *) REPO="$1"; shift ;;
+  esac
+done
+REPO="${REPO:-$(git remote get-url origin 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#' || true)}"
 REPO="${REPO:-sargeraas84/nextar}"
 
 command -v gh >/dev/null 2>&1 || { echo "error: gh CLI not found" >&2; exit 2; }
@@ -26,6 +39,46 @@ check() {  # check <name> <cond...>
     fail=1
   fi
 }
+
+# --- range mode: every one of the last N days must have had a green
+# schedule-event run of BOTH workflows. Used by the monthly audit; skips the
+# day-specific release-body checks (the body only carries the latest day).
+if [ "$RANGE" -gt 1 ]; then
+  echo "== nextar schedule verification for the last $RANGE days of $REPO (UTC) =="
+  bad=""
+  for wf in nightly.yml smoke.yml; do
+    echo "-- $wf --"
+    # date + conclusion per schedule-event run (100 = ~3 months of dailies).
+    RUNS=$(gh run list --repo "$REPO" --workflow "$wf" --event schedule --limit 100 --json conclusion,createdAt --jq '.[] | "\(.createdAt[0:10]) \(.conclusion)"' 2>/dev/null || true)
+    # Days before the workflow's first-ever schedule run can't be expected to
+    # have one (the repo may not have existed yet) — those days are skipped.
+    FIRST=$(printf '%s\n' "$RUNS" | awk 'NF { print $1 }' | sort | head -1)
+    ok=0; skipped=0; flagged=""
+    for ((i = 0; i < RANGE; i++)); do
+      D=$(date -u -d "-$i days" +%F 2>/dev/null || date -u -v-${i}d +%F)
+      if [ -n "$FIRST" ] && [[ "$D" < "$FIRST" ]]; then
+        skipped=$((skipped + 1))
+        continue
+      fi
+      # green iff at least one success and no failure that day.
+      if printf '%s\n' "$RUNS" | awk -v d="$D" '$1 == d && $2 == "success" { s = 1 } $1 == d && $2 == "failure" { f = 1 } END { exit !(s == 1 && f != 1) }'; then
+        ok=$((ok + 1))
+      else
+        flagged="$flagged $D"
+      fi
+    done
+    checked=$((RANGE - skipped))
+    echo "  $ok/$checked days green (first run $FIRST)${flagged:+ — flagged:$flagged}"
+    [ -n "$flagged" ] && { fail=1; bad="$bad [$wf:$flagged]"; }
+  done
+  echo
+  if [ "$fail" -eq 0 ]; then
+    echo "ALL GREEN — every one of the last $RANGE days had a green schedule-fired nightly and smoke."
+  else
+    echo "SOME CHECKS FAILED — missed or failed schedule slots:$bad"
+  fi
+  exit "$fail"
+fi
 
 echo "== nextar schedule verification for $(date -u +%F) (UTC) =="
 

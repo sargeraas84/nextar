@@ -1,0 +1,95 @@
+name: monthly-audit
+
+# Monthly audit of the schedule-fired nightly + smoke runs. The daily 04:37
+# (nightly) and 05:47 (smoke) cron jobs are the only thing keeping the
+# shipped artifacts fresh when no code changes land; if a slot is missed
+# (GitHub skips cron runs during long outages, or a run fails), nothing
+# notices until a human checks. This job re-checks the last 31 days every
+# month and opens (or updates) a `scheduled-audit` tracking issue whenever
+# any slot was missed or failed.
+#
+#   cron '0 7 1 * *' = 1st of month, 07:00 UTC — safely after that day's
+#   nightly (~05:10) and smoke (~06:25) runs have completed.
+
+on:
+  schedule:
+    - cron: '0 7 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # open/update the audit tracking issue when slots were missed
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the 31-day scheduled-run audit
+        id: audit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          OUT=$(bash scripts/check-scheduled-runs.sh -n 31 2>&1)
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "log<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$OUT" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Open or update the tracking issue
+        if: steps.audit.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        env:
+          AUDIT_LOG: ${{ steps.audit.outputs.log }}
+        with:
+          script: |
+            const label = 'scheduled-audit';
+            const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+            const title = `Scheduled-run audit ${month}: missed or failed slots`;
+            const body = [
+              '## Scheduled-run audit failed',
+              '',
+              'The monthly audit of the schedule-fired `nightly` (04:37 UTC) and `smoke` (05:47 UTC) runs found missed or failed slots in the last 31 days.',
+              '',
+              '```text',
+              process.env.AUDIT_LOG,
+              '```',
+              '',
+              '**Why this matters:** when no code lands, these two cron jobs are the only thing keeping the nightly release fresh and the shipped installers tested. Investigate the flagged dates (e.g. `gh run list --workflow <nightly|smoke>.yml --event schedule`) and fix the cause before the next nightly.',
+            ].join('\n');
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: [label],
+              per_page: 20,
+            });
+            if (open.length) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: open[0].number,
+                title,
+                body,
+              });
+              console.log(`Updated existing issue #${open[0].number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: [label],
+              });
+              console.log(`Opened issue #${created.data.number}`);
+            }
+
+      - name: Summarize (green)
+        if: steps.audit.outputs.exit_code == '0'
+        shell: bash
+        run: echo "All 31 days had green schedule-fired nightly and smoke runs."
