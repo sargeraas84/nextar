@@ -180,24 +180,60 @@ jobs:
           echo "--- body.md ($(wc -c < body.md) bytes) ---"
           cat body.md
 
-      - name: Publish nightly release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly
-          name: nextar nightly
-          prerelease: true
-          overwrite_files: true
+      # Publish via the gh CLI in a retry loop so a transient GitHub 503
+      # recovers with exponential backoff. The nightly tag is updated in
+      # place: create it on first run, otherwise edit the body/prerelease
+      # flag and re-upload the two binaries with --clobber (the screenshots
+      # workflow manages its own gallery assets, which this leaves intact).
+      - name: Publish nightly release (retry on transient errors)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG=nightly
+          FILES=(assets/nextar-setup.exe assets/nextar-macos.dmg)
+
           # Never silently publish an empty release: if the staged files are
           # missing (e.g. an upload-path regression), fail loudly instead of
           # wiping the previous nightly's assets.
-          fail_on_unmatched_files: true
-          body_path: ${{ github.workspace }}/body.md
-          files: |
-            assets/nextar-setup.exe
-            assets/nextar-macos.dmg
+          for f in "${FILES[@]}"; do
+            if [ ! -f "$f" ]; then echo "expected artifact missing: $f" >&2; exit 1; fi
+          done
 
-      # Post-publish guard: softprops only verifies the LOCAL files matched.
-      # This asserts the release actually serves them - both stable download
+          gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 && EXISTS=1 || EXISTS=0
+
+          attempt=1
+          max_attempts=5
+          while :; do
+            if [ "$EXISTS" = "1" ]; then
+              if gh release edit "$TAG" -R "$REPO" --prerelease --title "nextar nightly" --notes-file body.md \
+                   && gh release upload "$TAG" "${FILES[@]}" -R "$REPO" --clobber; then
+                echo "updated nightly release $TAG in place"
+                break
+              fi
+            else
+              if gh release create "$TAG" "${FILES[@]}" -R "$REPO" --prerelease \
+                   --title "nextar nightly" --notes-file body.md; then
+                echo "created nightly release $TAG"
+                break
+              fi
+            fi
+
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "nightly publish failed after $max_attempts attempts" >&2
+              exit 1
+            fi
+            delay=$(( 5 * 2 ** attempt ))
+            echo "publish attempt $attempt failed; retrying in ${delay}s..." >&2
+            sleep "$delay"
+            attempt=$(( attempt + 1 ))
+            gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 && EXISTS=1 || EXISTS=0
+          done
+
+      # Post-publish guard: the publish step only verifies the LOCAL files
+      # matched. This asserts the release actually serves them - both stable download
       # URLs must answer 200, the release must carry exactly the two expected
       # assets, and each served file's SHA-256 must equal the staged checksum
       # - so a regression like the dist/-prefix bug fails the nightly run

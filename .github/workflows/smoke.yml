@@ -209,6 +209,22 @@ jobs:
         run: |
           set -euo pipefail
           REPO="${{ github.repository }}"
+          # Retry a gh invocation with exponential backoff so a transient 503
+          # on the POST/PATCH mutations doesn't drop the daily smoke log.
+          retry_gh() {
+            local attempt=1 max=5 delay
+            while :; do
+              if gh "$@"; then return 0; fi
+              if [ "$attempt" -ge "$max" ]; then
+                echo "gh $* failed after $max attempts" >&2
+                return 1
+              fi
+              delay=$(( 5 * 2 ** attempt ))
+              echo "gh $* failed; retrying in ${delay}s..." >&2
+              sleep "$delay"
+              attempt=$(( attempt + 1 ))
+            done
+          }
           RELEASE_ID=$(gh api "repos/$REPO/releases/tags/nightly" --jq '.id')
           COMMIT=$(gh api "repos/$REPO/releases/tags/nightly" --jq '.body' | grep -m1 '^- commit:' | awk '{print $3}')
           MAC=${{ needs.macos-dmg.result }}
@@ -224,7 +240,8 @@ jobs:
           # filtering by exact title in jq is fast and deterministic.
           ISSUE=$(gh api "repos/$REPO/issues?state=open&per_page=100" --jq '[.[] | select(.title == "Daily smoke log")][0].number // empty')
           if [ -z "$ISSUE" ]; then
-            ISSUE=$(gh api --method POST "repos/$REPO/issues" -f title="Daily smoke log" -f body="Canonical, append-only log of the daily scheduled smoke runs against the nightly release. Each run appends a dated entry below." --jq '.number')
+            retry_gh api --method POST "repos/$REPO/issues" -f title="Daily smoke log" -f body="Canonical, append-only log of the daily scheduled smoke runs against the nightly release. Each run appends a dated entry below." --jq '.number' > /tmp/issue.json
+            ISSUE=$(cat /tmp/issue.json)
             echo "created daily log issue #$ISSUE"
           fi
 
@@ -238,10 +255,10 @@ jobs:
           printf '%s\n\n%s' "$BASE" "$(printf '%b' "$SMOKE")" > /tmp/nightly-body.md
           echo "--- new release body ---"
           cat /tmp/nightly-body.md
-          gh api --method PATCH "repos/$REPO/releases/$RELEASE_ID" -f body="$(cat /tmp/nightly-body.md)" --jq '.id' >/dev/null
+          retry_gh api --method PATCH "repos/$REPO/releases/$RELEASE_ID" -f body="$(cat /tmp/nightly-body.md)" --jq '.id' >/dev/null
           echo "body updated on release $RELEASE_ID"
 
           # 2) Append a dated comment to the daily log issue for the permanent
           #    history (the release body is rewritten nightly).
-          gh api --method POST "repos/$REPO/issues/$ISSUE/comments" -f body="$(printf '%b' "$SMOKE")" --jq '.html_url'
+          retry_gh api --method POST "repos/$REPO/issues/$ISSUE/comments" -f body="$(printf '%b' "$SMOKE")" --jq '.html_url'
           echo "logged to issue #$ISSUE"

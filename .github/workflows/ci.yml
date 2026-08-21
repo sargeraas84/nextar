@@ -177,3 +177,29 @@ jobs:
           name: nextar-macos-dmg
           path: dist/*.dmg
           if-no-files-found: error
+
+  # Exercises the release workflow's cross-version upgrade opt-out without a
+  # 25-minute release build. resolve-prev-stable.ps1 is the same script the
+  # release workflow calls; -PrevTag bypasses the API so the "no previous
+  # stable" and "resolved" branches can be proven fast on every push/PR.
+  first-release-optout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the first-release opt-out path
+        shell: pwsh
+        run: |
+          # Simulate a repo with no previous stable release.
+          $out = scripts/resolve-prev-stable.ps1 -Tag v0.1.0 -PrevTag ''
+          if ($out -ne 'NONE') { throw "expected NONE without opt-out, got '$out'" }
+
+          # With the opt-out: skip.
+          $out = scripts/resolve-prev-stable.ps1 -Tag v0.1.0 -PrevTag '' -AllowNoPrev:$true
+          if ($out -ne 'SKIP') { throw "expected SKIP with opt-out, got '$out'" }
+
+          # A real previous tag must resolve and print it.
+          $out = scripts/resolve-prev-stable.ps1 -Tag v0.1.1 -PrevTag v0.1.0
+          if ($out -ne 'v0.1.0') { throw "expected v0.1.0, got '$out'" }
+
+          Write-Host "first-release opt-out path verified"
