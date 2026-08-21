@@ -269,9 +269,10 @@ jobs:
 
       # Release gate: the full installer lifecycle must pass before the
       # artifacts are attached to the release. Two legs: an in-place
-      # install/upgrade/uninstall of this build, plus (when a previous
-      # stable release exists) a cross-version upgrade from it, so every
-      # cut is proven to upgrade cleanly from the prior stable version.
+      # install/upgrade/uninstall of this build, plus a REQUIRED cross-version
+      # upgrade from the previous stable release. If no previous stable is
+      # found, the job fails rather than silently shipping an upgrade path
+      # that was never exercised.
       - name: Download previous stable installer (upgrade-from leg)
         shell: pwsh
         env:
@@ -288,8 +289,7 @@ jobs:
           $latest = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/${{ github.repository }}/releases/latest"
           $prev = $latest.tag_name
           if (-not $prev -or $prev -eq $tag) {
-            Write-Host "No previous stable release found - the cross-version leg will be skipped."
-            exit 0
+            throw "No previous stable release found (tag=$tag, prev=$prev) - refusing to ship without an upgrade-tested path."
           }
           Write-Host "Previous stable release: $prev"
           Invoke-WebRequest "https://github.com/${{ github.repository }}/releases/download/$prev/nextar-setup.exe" -OutFile "$env:RUNNER_TEMP\prev-setup.exe"
@@ -302,14 +302,13 @@ jobs:
           & powershell.exe @common
           if ($LASTEXITCODE -ne 0) { throw "in-place installer E2E failed (exit $LASTEXITCODE)" }
           Write-Host "in-place E2E passed"
-          if (Test-Path "$env:RUNNER_TEMP\prev-setup.exe") {
-            Write-Host "running cross-version upgrade E2E (-UpgradeFrom previous stable)..."
-            & powershell.exe @common '-UpgradeFrom' "$env:RUNNER_TEMP\prev-setup.exe"
-            if ($LASTEXITCODE -ne 0) { throw "cross-version upgrade E2E failed (exit $LASTEXITCODE)" }
-            Write-Host "cross-version upgrade E2E passed"
-          } else {
-            Write-Host "no previous stable - skipped the cross-version leg"
+          if (-not (Test-Path "$env:RUNNER_TEMP\prev-setup.exe")) {
+            throw "previous stable installer is missing - the cross-version leg cannot run"
           }
+          Write-Host "running cross-version upgrade E2E (-UpgradeFrom previous stable)..."
+          & powershell.exe @common '-UpgradeFrom' "$env:RUNNER_TEMP\prev-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "cross-version upgrade E2E failed (exit $LASTEXITCODE)" }
+          Write-Host "cross-version upgrade E2E passed"
 
       - uses: actions/upload-artifact@v4
         with:
