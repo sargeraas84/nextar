@@ -167,10 +167,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tags = gh api "repos/${{ github.repository }}/releases?per_page=100" --jq '.[].tag_name'
-          $prev = $tags | Where-Object { $_ -and $_ -ne 'nightly' } | Select-Object -First 1
-          if (-not $prev) {
-            Write-Host "no previous stable release found - upgrade leg skipped"
+          # Reuse the release workflow's resolver (with its API retry) instead
+          # of an inline gh call, so a transient 503 can't drop the daily
+          # upgrade leg.
+          $prev = scripts/resolve-prev-stable.ps1 -Tag nightly -AllowNoPrev:$true
+          if ($prev -eq 'NONE' -or $prev -eq 'SKIP') {
+            Write-Host "no previous stable release - upgrade leg skipped"
             exit 0
           }
           Write-Host "Previous stable release: $prev"

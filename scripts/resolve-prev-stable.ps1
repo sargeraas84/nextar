@@ -32,7 +32,26 @@ if ($PSBoundParameters.ContainsKey('PrevTag')) {
   $repo = $env:GITHUB_REPOSITORY
   if (-not $repo) { Write-Output "NONE"; return }
   $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "nextar-release-ci" }
-  $releases = @(Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$repo/releases?per_page=100")
+  $uri = "https://api.github.com/repos/$repo/releases?per_page=100"
+  # Retry the list call so a transient GitHub 503 can't kill a release cut.
+  $releases = $null
+  $attempt = 1
+  $max = 5
+  while ($true) {
+    try {
+      # NOTE: do NOT wrap this in @(). Invoke-RestMethod emits the JSON
+      # array as a single (non-enumerated) object, so @(...) would produce
+      # a one-element array containing the array and break the filter below.
+      $releases = Invoke-RestMethod -Headers $headers -Uri $uri
+      break
+    } catch {
+      if ($attempt -ge $max) { throw }
+      $delay = 5 * [math]::Pow(2, $attempt)
+      Write-Host "previous-stable lookup failed (attempt $attempt): $($_.Exception.Message); retrying in ${delay}s..."
+      Start-Sleep -Seconds $delay
+      $attempt++
+    }
+  }
   $stable = $releases |
     Where-Object { -not $_.draft -and -not $_.prerelease -and $_.tag_name -ne 'nightly' } |
     Select-Object -First 1

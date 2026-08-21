@@ -189,6 +189,8 @@ jobs:
 
       - name: Verify the first-release opt-out path
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Simulate a repo with no previous stable release.
           $out = scripts/resolve-prev-stable.ps1 -Tag v0.1.0 -PrevTag ''
@@ -202,4 +204,10 @@ jobs:
           $out = scripts/resolve-prev-stable.ps1 -Tag v0.1.1 -PrevTag v0.1.0
           if ($out -ne 'v0.1.0') { throw "expected v0.1.0, got '$out'" }
 
-          Write-Host "first-release opt-out path verified"
+          # Live API regression check (bypasses -PrevTag): the resolver must
+          # actually return a real tag, not NONE, proving the Invoke-RestMethod
+          # + filter path still works against the real repo.
+          $out = scripts/resolve-prev-stable.ps1 -Tag v999.0.0
+          if ($out -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "live resolve returned unexpected '$out'" }
+
+          Write-Host "first-release opt-out path verified (live: $out)"
