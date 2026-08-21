@@ -1,6 +1,6 @@
 [package]
 name = "nextar-setup"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
 authors = ["Michael Rieger"]
 description = "nextar installer: bundles nextar.exe + nextar-gui.exe and registers Explorer shell integration"
