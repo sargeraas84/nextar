@@ -750,10 +750,10 @@
         <div class="shell reveal" style="--d:.19s;grid-column:1/-1">
           <div class="core">
             <div class="os-icon"><svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm2 4h10v2H7V7zm0 4h10v2H7v-2zm0 4h6v2H7v-2z"/></svg></div>
-            <h3>Stable · v0.3.6</h3>
+            <h3>Stable · v0.3.7</h3>
             <p class="ver">pinned release — both platforms</p>
             <p>Versioned builds ship code-signed on Windows when signing is configured, and both installers pass the full install → upgrade → uninstall E2E before releasing. Pick the pinned version when you want a fixed release, or the rolling nightly above for the newest master build.</p>
-            <span class="live-badge" data-stable-badge="nextar-setup.exe"><span class="dot"></span><span class="bt">checking v0.3.6…</span></span>
+            <span class="live-badge" data-stable-badge="nextar-setup.exe"><span class="dot"></span><span class="bt">checking v0.3.7…</span></span>
             <div class="verify reveal" data-stable-verify="nextar-setup.exe" style="--d:.2s">
               <div class="verify-head">
                 <span class="verify-lbl">SHA-256</span>
@@ -761,7 +761,7 @@
                   <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
                 </button>
               </div>
-              <code class="verify-hash">checking v0.3.6…</code>
+              <code class="verify-hash">checking v0.3.7…</code>
               <p class="verify-cmd">verify with <code>Get-FileHash nextar-setup.exe -Algorithm SHA256</code></p>
             </div>
             <div class="verify reveal" data-stable-verify="nextar-macos.dmg" style="--d:.24s">
@@ -771,8 +771,8 @@
                   <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/></svg>
                 </button>
               </div>
-              <code class="verify-hash">checking v0.3.6…</code>
-              <p class="verify-cmd">verify with <code>shasum -a 256 nextar-0.3.6-macos.dmg</code></p>
+              <code class="verify-hash">checking v0.3.7…</code>
+              <p class="verify-cmd">verify with <code>shasum -a 256 nextar-0.3.7-macos.dmg</code></p>
             </div>
             <div style="margin-top:28px;display:flex;gap:10px;flex-wrap:wrap">
               <a class="btn btn-primary" href="#" data-stable-download="nextar-setup.exe">
@@ -787,7 +787,7 @@
           </div>
         </div>
       </div>
-      <p id="dl-note" class="reveal" style="margin-top:26px;font-size:12.5px;color:var(--ink-faint);text-align:center">Nightly cards always resolve to the latest build from <span class="mono" style="color:var(--cyan)">master</span>; the stable card is pinned to the <span class="mono">v0.3.6</span> release.</p>
+      <p id="dl-note" class="reveal" style="margin-top:26px;font-size:12.5px;color:var(--ink-faint);text-align:center">Nightly cards always resolve to the latest build from <span class="mono" style="color:var(--cyan)">master</span>; the stable card is pinned to the <span class="mono">v0.3.7</span> release.</p>
 
       <!-- Daily smoke status: reads the latest entry from the "Daily smoke
            log" issue posted by the smoke workflow, so a failed scheduled
@@ -903,11 +903,11 @@
     a.href = relBase + f;
   });
 
-  // Stable release channel: the pinned versioned release (v0.3.6). The dmg
+  // Stable release channel: the pinned versioned release (v0.3.7). The dmg
   // is named nextar-<version>-macos.dmg there (the nightly uses the fixed
   // nextar-macos.dmg name), so map card keys to release asset names.
-  var STABLE_TAG = 'v0.3.6';
-  var STABLE_ASSETS = { 'nextar-setup.exe': 'nextar-setup.exe', 'nextar-macos.dmg': 'nextar-0.3.6-macos.dmg' };
+  var STABLE_TAG = 'v0.3.7';
+  var STABLE_ASSETS = { 'nextar-setup.exe': 'nextar-setup.exe', 'nextar-macos.dmg': 'nextar-0.3.7-macos.dmg' };
   var stableBase = local ? '../dist/' : 'https://github.com/' + REPO + '/releases/download/' + STABLE_TAG + '/';
   document.querySelectorAll('[data-stable-download]').forEach(function(a){
     var key = a.getAttribute('data-stable-download');
@@ -1011,7 +1011,7 @@
     });
   }
 
-  // Stable release channel: read the pinned v0.3.6 release (tag from
+  // Stable release channel: read the pinned v0.3.7 release (tag from
   // STABLE_TAG above) and paint its live badge + SHA-256 checksums the same
   // way the nightly cards work. The stable dmg is versioned in the asset
   // name (nextar-0.3.0-macos.dmg) but the body/verify keys use the plain
