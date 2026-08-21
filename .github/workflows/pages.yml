@@ -87,7 +87,15 @@ jobs:
     needs: build
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      # wretry forwards the wrapped action's outputs as a JSON map named
+      # `outputs`; guard against an empty value so the expression never throws.
+      url: ${{ steps.deployment.outputs.outputs && fromJSON(steps.deployment.outputs.outputs).page_url || '' }}
     steps:
+      # Wrap the Pages deploy so a transient 503 from the Pages API recovers
+      # with backoff instead of failing the run and needing a manual re-run.
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: Wandalen/wretry.action@v3.8.0
+        with:
+          action: actions/deploy-pages@v4
+          attempt_limit: 5
+          attempt_delay: 15000

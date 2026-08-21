@@ -19,6 +19,11 @@ on:
       version:
         description: 'Version to release (e.g. 0.2.0). Bumps Cargo.toml, tags v0.2.0, builds and releases.'
         required: true
+      allow-no-prev:
+        description: "Skip the required cross-version upgrade leg (only for a repo's very first release)"
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: write
@@ -72,6 +77,8 @@ jobs:
       SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORG_ID }}
       SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
       SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+      # workflow_dispatch opt-out for the cross-version leg (first-ever release).
+      ALLOW_NO_PREV: ${{ github.event.inputs.allow-no-prev }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -289,6 +296,10 @@ jobs:
           $latest = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/${{ github.repository }}/releases/latest"
           $prev = $latest.tag_name
           if (-not $prev -or $prev -eq $tag) {
+            if ($env:ALLOW_NO_PREV -eq 'true') {
+              Write-Host "No previous stable release found; allow-no-prev set - skipping the cross-version upgrade leg."
+              exit 0
+            }
             throw "No previous stable release found (tag=$tag, prev=$prev) - refusing to ship without an upgrade-tested path."
           }
           Write-Host "Previous stable release: $prev"
@@ -303,12 +314,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "in-place installer E2E failed (exit $LASTEXITCODE)" }
           Write-Host "in-place E2E passed"
           if (-not (Test-Path "$env:RUNNER_TEMP\prev-setup.exe")) {
-            throw "previous stable installer is missing - the cross-version leg cannot run"
+            if ($env:ALLOW_NO_PREV -eq 'true') {
+              Write-Host "allow-no-prev set and no previous installer - cross-version leg skipped."
+            } else {
+              throw "previous stable installer is missing - the cross-version leg cannot run"
+            }
+          } else {
+            Write-Host "running cross-version upgrade E2E (-UpgradeFrom previous stable)..."
+            & powershell.exe @common '-UpgradeFrom' "$env:RUNNER_TEMP\prev-setup.exe"
+            if ($LASTEXITCODE -ne 0) { throw "cross-version upgrade E2E failed (exit $LASTEXITCODE)" }
+            Write-Host "cross-version upgrade E2E passed"
           }
-          Write-Host "running cross-version upgrade E2E (-UpgradeFrom previous stable)..."
-          & powershell.exe @common '-UpgradeFrom' "$env:RUNNER_TEMP\prev-setup.exe"
-          if ($LASTEXITCODE -ne 0) { throw "cross-version upgrade E2E failed (exit $LASTEXITCODE)" }
-          Write-Host "cross-version upgrade E2E passed"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -408,18 +424,59 @@ jobs:
           echo "--- body.md ---"
           cat body.md
 
-      - name: Create GitHub release with artifacts
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
-          name: nextar ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}
-          body_path: ${{ github.workspace }}/body.md
-          generate_release_notes: true
-          # Never silently ship an empty release: fail loudly if any expected
-          # artifact is missing from the download step.
-          fail_on_unmatched_files: true
-          files: |
-            assets/nextar-setup.exe
-            assets/nextar.exe
-            assets/nextar-gui.exe
-            assets/nextar-*.dmg
+      # Publish via the gh CLI in a retry loop so a transient GitHub 503
+      # (create/upload mid-flight) recovers with exponential backoff instead
+      # of failing the whole release. `gh release create` is used when the
+      # release doesn't exist yet; once it exists, retries fall back to
+      # `gh release upload --clobber` so a partially-published release is
+      # completed rather than erroring on the already-existing tag.
+      - name: Publish release with artifacts (retry on transient errors)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.ref_name }}"
+          DMG="$(ls assets/nextar-*.dmg)"
+          FILES=(assets/nextar-setup.exe assets/nextar.exe assets/nextar-gui.exe "$DMG")
+
+          # Replicate softprops' fail_on_unmatched_files: never silently ship
+          # an empty release - every expected artifact must be present first.
+          for f in "${FILES[@]}"; do
+            if [ ! -f "$f" ]; then echo "expected artifact missing: $f" >&2; exit 1; fi
+          done
+
+          gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 && EXISTS=1 || EXISTS=0
+
+          attempt=1
+          max_attempts=5
+          while :; do
+            if [ "$EXISTS" = "1" ]; then
+              if gh release upload "$TAG" "${FILES[@]}" -R "$REPO" --clobber; then
+                echo "assets uploaded to existing release $TAG"
+                break
+              fi
+            else
+              if gh release create "$TAG" "${FILES[@]}" -R "$REPO" \
+                   --title "nextar $TAG" --notes-file body.md --generate-notes; then
+                echo "created release $TAG with artifacts"
+                break
+              fi
+            fi
+
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "release publish failed after $max_attempts attempts" >&2
+              exit 1
+            fi
+
+            # Exponential backoff: 10s, 20s, 40s, 80s.
+            delay=$(( 5 * 2 ** attempt ))
+            echo "publish attempt $attempt failed; retrying in ${delay}s..." >&2
+            sleep "$delay"
+            attempt=$(( attempt + 1 ))
+
+            # A failed `create` may still have created the release (asset
+            # upload 503 mid-flight), so re-check before the next attempt.
+            gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 && EXISTS=1 || EXISTS=0
+          done
